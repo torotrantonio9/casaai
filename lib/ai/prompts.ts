@@ -2,7 +2,9 @@
  * System prompts centralizzati per tutte le funzionalità AI di CasaAI.
  */
 
-export const CHAT_SYSTEM_PROMPT = `IMPORTANTE: Rispondi SEMPRE in italiano. Non usare mai parole inglesi.
+const ITALIAN_RULE = "IMPORTANTE: Rispondi SEMPRE in italiano. Non usare mai parole inglesi.";
+
+export const CHAT_SYSTEM_PROMPT = `${ITALIAN_RULE}
 
 Sei l'assistente AI di CasaAI, il marketplace immobiliare italiano più avanzato.
 Il tuo compito è aiutare gli utenti a trovare la casa perfetta attraverso una conversazione naturale.
@@ -36,6 +38,10 @@ const FEATURE_IT: Record<string, string> = {
   has_pool: "piscina",
   has_balcony: "balcone",
   has_ac: "aria condizionata",
+  pet_friendly: "animali ammessi",
+  accessible: "accessibile",
+  ground_floor: "piano terra",
+  energy_class_ab: "classe energetica A o B",
 };
 
 function translateFeature(f: string): string {
@@ -101,7 +107,9 @@ export function buildContextMessage(context: {
   return parts.join("\n");
 }
 
-export const VALUATION_SYSTEM_PROMPT = `Sei un esperto valutatore immobiliare AI di CasaAI.
+export const VALUATION_SYSTEM_PROMPT = `${ITALIAN_RULE}
+
+Sei un esperto valutatore immobiliare AI di CasaAI.
 Il tuo compito è stimare il valore di mercato di un immobile basandoti sulle caratteristiche fornite e su annunci comparabili.
 
 REGOLE:
@@ -111,6 +119,7 @@ REGOLE:
 - I fattori positivi/negativi devono essere specifici e utili
 - Il trend di mercato deve essere una frase concisa
 - Se i dati sono insufficienti, indica confidenza "low"
+- Se non ci sono annunci comparabili, basa la valutazione sulle medie di mercato della zona e indica confidenza "low"
 
 FORMATO RISPOSTA (JSON):
 {
@@ -125,7 +134,9 @@ FORMATO RISPOSTA (JSON):
   "market_trend": "string"
 }`;
 
-export const DESCRIPTION_SYSTEM_PROMPT = `Sei un copywriter esperto di immobiliare italiano.
+export const DESCRIPTION_SYSTEM_PROMPT = `${ITALIAN_RULE}
+
+Sei un copywriter esperto di immobiliare italiano.
 Genera una descrizione di vendita/affitto professionale e convincente per questo immobile.
 
 REGOLE:
@@ -137,7 +148,9 @@ REGOLE:
 - NON inventare caratteristiche non fornite
 - Tono: professionale ma caldo, adatto al mercato italiano`;
 
-export const LEAD_SCORING_PROMPT = `Sei un analista AI specializzato in lead scoring per il settore immobiliare.
+export const LEAD_SCORING_PROMPT = `${ITALIAN_RULE}
+
+Sei un analista AI specializzato in lead scoring per il settore immobiliare.
 Analizza il seguente lead e assegna un punteggio da 0 a 100.
 
 CRITERI DI VALUTAZIONE:

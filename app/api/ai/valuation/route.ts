@@ -32,6 +32,13 @@ interface ValuationResponse {
 
 export async function POST(request: NextRequest) {
   try {
+    if (!process.env.ANTHROPIC_API_KEY) {
+      return NextResponse.json(
+        { error: "Servizio AI non configurato. Contatta l'amministratore." },
+        { status: 503 }
+      );
+    }
+
     const body: ValuationRequest = await request.json();
 
     if (!body.address || !body.city || !body.type || !body.surface_sqm) {
@@ -41,14 +48,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Find comparable listings
-    const comparables = await findComparables({
-      city: body.city,
-      property_type: body.type,
-      surface_sqm: body.surface_sqm,
-      rooms: body.rooms,
-      limit: 10,
-    });
+    // Find comparable listings — don't fail if none found
+    let comparables: Awaited<ReturnType<typeof findComparables>> = [];
+    try {
+      comparables = await findComparables({
+        city: body.city,
+        property_type: body.type,
+        surface_sqm: body.surface_sqm,
+        rooms: body.rooms,
+        limit: 10,
+      });
+    } catch (err) {
+      console.error("[valuation] Errore ricerca comparabili:", err);
+      // Continue without comparables
+    }
 
     // Build context for Claude
     const propertyDetails = [
@@ -66,7 +79,7 @@ export async function POST(request: NextRequest) {
       .filter(Boolean)
       .join("\n");
 
-    let comparablesText = "Nessun annuncio comparabile trovato nel database.";
+    let comparablesText: string;
     if (comparables.length > 0) {
       comparablesText = `Annunci comparabili trovati (${comparables.length}):\n${comparables
         .map(
@@ -74,6 +87,11 @@ export async function POST(request: NextRequest) {
             `- "${c.title}" - €${c.price.toLocaleString("it-IT")} - ${c.surface_sqm}m² - ${c.rooms} locali - ${c.city}`
         )
         .join("\n")}`;
+    } else {
+      comparablesText =
+        "Nessun annuncio comparabile trovato nel database. " +
+        "Effettua la valutazione basandoti sulle medie di mercato della zona " +
+        `di ${body.city} per immobili di tipo ${body.type}. Indica confidenza "low".`;
     }
 
     const userMessage = `Valuta questo immobile:\n\n${propertyDetails}\n\n${comparablesText}`;
@@ -89,10 +107,9 @@ export async function POST(request: NextRequest) {
       comparable_listings: comparables.slice(0, 5),
     });
   } catch (err) {
-    console.error("Valuation error:", err);
-    return NextResponse.json(
-      { error: "Errore durante la valutazione" },
-      { status: 500 }
-    );
+    console.error("[valuation] Errore:", err);
+    const message =
+      err instanceof Error ? err.message : "Errore durante la valutazione";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

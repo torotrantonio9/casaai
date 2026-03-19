@@ -22,7 +22,9 @@ export default function NuovoAnnuncioPage() {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiDescription, setAiDescription] = useState("");
   const [selectedTone, setSelectedTone] = useState<Tone>("professional");
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [photos, setPhotos] = useState<string[]>([]);
+  const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
   async function generateDescription(form: HTMLFormElement) {
     setAiLoading(true);
@@ -67,31 +69,72 @@ export default function NuovoAnnuncioPage() {
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    setFeedback(null);
     setSaving(true);
     const fd = new FormData(e.currentTarget);
+
+    // Client-side validation
+    const title = (fd.get("title") as string)?.trim();
+    const price = Number(fd.get("price"));
+    const surfaceSqm = Number(fd.get("surface_sqm"));
+    const rooms = Number(fd.get("rooms"));
+    const address = (fd.get("address") as string)?.trim();
+    const city = (fd.get("city") as string)?.trim();
+    const province = (fd.get("province") as string)?.trim();
+
+    if (!title || title.length < 5) {
+      setFeedback({ type: "error", message: "Il titolo deve avere almeno 5 caratteri." });
+      setSaving(false);
+      return;
+    }
+    if (!price || price <= 0) {
+      setFeedback({ type: "error", message: "Inserisci un prezzo valido maggiore di 0." });
+      setSaving(false);
+      return;
+    }
+    if (!surfaceSqm || surfaceSqm <= 0) {
+      setFeedback({ type: "error", message: "Inserisci una superficie valida." });
+      setSaving(false);
+      return;
+    }
+    if (!rooms || rooms < 1) {
+      setFeedback({ type: "error", message: "Inserisci almeno 1 locale." });
+      setSaving(false);
+      return;
+    }
+    if (!address || !city || !province) {
+      setFeedback({ type: "error", message: "Indirizzo, città e provincia sono obbligatori." });
+      setSaving(false);
+      return;
+    }
+
     const supabase = createClient();
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    if (!user) return;
+    if (!user) {
+      setFeedback({ type: "error", message: "Sessione scaduta. Effettua nuovamente il login." });
+      setSaving(false);
+      return;
+    }
 
     const listing = {
       agent_id: user.id,
-      title: fd.get("title") as string,
+      title,
       type: fd.get("type") as string,
       property_type: fd.get("property_type") as string,
-      price: Number(fd.get("price")),
+      price,
       price_period: fd.get("type") === "rent" ? "month" : null,
-      surface_sqm: Number(fd.get("surface_sqm")),
-      rooms: Number(fd.get("rooms")),
-      bathrooms: Number(fd.get("bathrooms")),
+      surface_sqm: surfaceSqm,
+      rooms,
+      bathrooms: Number(fd.get("bathrooms")) || 1,
       floor: fd.get("floor") ? Number(fd.get("floor")) : null,
       total_floors: fd.get("total_floors") ? Number(fd.get("total_floors")) : null,
       year_built: fd.get("year_built") ? Number(fd.get("year_built")) : null,
       energy_class: (fd.get("energy_class") as string) || null,
-      address: fd.get("address") as string,
-      city: fd.get("city") as string,
-      province: fd.get("province") as string,
+      address,
+      city,
+      province,
       zip_code: fd.get("zip_code") as string,
       neighborhood: fd.get("neighborhood") as string,
       description: fd.get("description") as string,
@@ -106,10 +149,17 @@ export default function NuovoAnnuncioPage() {
     };
 
     const { error } = await supabase.from("listings").insert(listing);
-    if (!error) {
-      window.location.href = "/dashboard/annunci";
+    if (error) {
+      console.error("[nuovo annuncio] Errore salvataggio:", error);
+      setFeedback({ type: "error", message: `Errore: ${error.message}` });
+      setSaving(false);
+      return;
     }
-    setSaving(false);
+
+    setFeedback({ type: "success", message: "Annuncio salvato con successo! Reindirizzamento..." });
+    setTimeout(() => {
+      window.location.href = "/dashboard/annunci";
+    }, 1500);
   }
 
   const formRef = useState<HTMLFormElement | null>(null);
@@ -435,6 +485,19 @@ export default function NuovoAnnuncioPage() {
             )}
           </div>
         </fieldset>
+
+        {/* Feedback */}
+        {feedback && (
+          <div
+            className={`rounded-lg p-4 text-sm font-medium ${
+              feedback.type === "success"
+                ? "bg-green-50 text-green-700 border border-green-200"
+                : "bg-red-50 text-red-700 border border-red-200"
+            }`}
+          >
+            {feedback.message}
+          </div>
+        )}
 
         {/* Submit */}
         <div className="flex gap-3">

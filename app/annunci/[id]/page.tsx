@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
@@ -139,7 +140,7 @@ export default async function AnnuncioPage({
     <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
       {/* Breadcrumb */}
       <nav className="mb-4 text-sm text-gray-500">
-        <a href="/" className="hover:text-blue-600">Home</a>
+        <Link href="/" className="hover:text-blue-600">Home</Link>
         {" > "}
         <a href="/cerca" className="hover:text-blue-600">{listing.city}</a>
         {" > "}

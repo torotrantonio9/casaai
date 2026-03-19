@@ -2,8 +2,11 @@ import Anthropic from "@anthropic-ai/sdk";
 
 let _anthropic: Anthropic | null = null;
 function getAnthropic() {
+  if (!process.env.ANTHROPIC_API_KEY) {
+    throw new Error("ANTHROPIC_API_KEY non configurata");
+  }
   if (!_anthropic) {
-    _anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
+    _anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
   }
   return _anthropic;
 }
@@ -17,18 +20,20 @@ export interface StreamChatOptions {
 /**
  * Stream a chat response from Claude.
  * Returns a ReadableStream of SSE-formatted chunks.
+ * NOTE: does NOT send a "done" event — the caller (chat/route.ts) handles that.
  */
 export function streamChat({
   systemPrompt,
   messages,
   maxTokens = 2048,
-}: StreamChatOptions): ReadableStream {
+}: StreamChatOptions): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
 
   return new ReadableStream({
     async start(controller) {
       try {
-        const stream = getAnthropic().messages.stream({
+        const client = getAnthropic();
+        const stream = client.messages.stream({
           model: "claude-sonnet-4-6-20250514",
           max_tokens: maxTokens,
           system: systemPrompt,
@@ -51,13 +56,12 @@ export function streamChat({
           }
         }
 
-        controller.enqueue(
-          encoder.encode(`data: ${JSON.stringify({ type: "done" })}\n\n`)
-        );
+        // Do NOT send "done" here — the caller handles it
         controller.close();
       } catch (error) {
+        console.error("[claude.ts] Stream error:", error);
         const msg =
-          error instanceof Error ? error.message : "Errore sconosciuto";
+          error instanceof Error ? error.message : "Errore AI sconosciuto";
         controller.enqueue(
           encoder.encode(
             `data: ${JSON.stringify({ type: "error", content: msg })}\n\n`
@@ -77,7 +81,8 @@ export async function chatJSON<T>(options: {
   userMessage: string;
   maxTokens?: number;
 }): Promise<T> {
-  const response = await getAnthropic().messages.create({
+  const client = getAnthropic();
+  const response = await client.messages.create({
     model: "claude-sonnet-4-6-20250514",
     max_tokens: options.maxTokens ?? 2048,
     system: options.systemPrompt,
@@ -88,7 +93,8 @@ export async function chatJSON<T>(options: {
     response.content[0].type === "text" ? response.content[0].text : "";
 
   // Extract JSON from response (handles ```json ... ``` blocks)
-  const jsonMatch = text.match(/```json\s*([\s\S]*?)```/) || text.match(/\{[\s\S]*\}/);
+  const jsonMatch =
+    text.match(/```json\s*([\s\S]*?)```/) || text.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {
     throw new Error("Risposta AI non contiene JSON valido");
   }

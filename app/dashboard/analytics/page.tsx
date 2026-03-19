@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useSyncExternalStore } from "react";
 import {
   LineChart,
   Line,
@@ -49,9 +49,12 @@ const FUNNEL_DATA = [
   { stage: "Venduti", value: 8 },
 ];
 
+const subscribe = () => () => {};
+const getSnapshot = () => true;
+const getServerSnapshot = () => false;
+
 export default function AnalyticsPage() {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  const mounted = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
   if (!mounted) {
     return (
@@ -123,10 +126,9 @@ export default function AnalyticsPage() {
                   innerRadius={50}
                   outerRadius={80}
                   dataKey="value"
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  label={((props: any) =>
+                  label={((props: { name?: string; percent?: number }) =>
                     `${props.name ?? ""} ${((props.percent ?? 0) * 100).toFixed(0)}%`
-                  ) as any}
+                  ) as React.ComponentProps<typeof Pie>["label"]}
                 >
                   {LEAD_SOURCE_DATA.map((entry) => (
                     <Cell key={entry.name} fill={entry.color} />

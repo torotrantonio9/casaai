@@ -55,10 +55,10 @@ export function ChatWidget({ sessionId, contextId, welcomeMessage }: Props) {
 
     abortRef.current = new AbortController();
 
-    // 30-second timeout
+    // 45-second timeout
     const timeoutId = setTimeout(() => {
       abortRef.current?.abort();
-    }, 30000);
+    }, 45000);
 
     try {
       const res = await fetch("/api/chat", {
@@ -81,66 +81,83 @@ export function ChatWidget({ sessionId, contextId, welcomeMessage }: Props) {
       }
 
       const reader = res.body?.getReader();
-      if (!reader) throw new Error("No reader");
+      if (!reader) throw new Error("Nessuna risposta dal server");
 
       const decoder = new TextDecoder();
       let fullText = "";
+      let sseBuffer = ""; // Buffer to handle chunks split across SSE boundaries
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split("\n");
+        sseBuffer += decoder.decode(value, { stream: true });
 
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const jsonStr = line.slice(6);
-          if (!jsonStr) continue;
+        // Process complete SSE lines (terminated by \n\n)
+        const parts = sseBuffer.split("\n\n");
+        // Keep the last part as buffer (may be incomplete)
+        sseBuffer = parts.pop() ?? "";
 
-          try {
-            const event = JSON.parse(jsonStr);
-            if (event.type === "text") {
-              fullText += event.content;
-              // Strip hidden filter block from display
-              const displayText = fullText.replace(
-                /<!--FILTERS:[\s\S]*?-->/,
-                ""
-              );
-              setStreamingText(displayText);
-            } else if (event.type === "listings") {
-              setListings(event.data);
-            } else if (event.type === "error") {
-              // Server-sent error — show in chat
-              setMessages((prev) => [
-                ...prev,
-                {
-                  role: "assistant",
-                  content: event.content ?? "Si è verificato un errore. Riprova tra poco.",
-                },
-              ]);
-              setStreamingText("");
-            } else if (event.type === "done") {
-              const displayText = fullText.replace(
-                /<!--FILTERS:[\s\S]*?-->/,
-                ""
-              );
-              if (displayText.trim()) {
+        for (const part of parts) {
+          const lines = part.split("\n");
+          for (const line of lines) {
+            if (!line.startsWith("data: ")) continue;
+            const jsonStr = line.slice(6).trim();
+            if (!jsonStr) continue;
+
+            try {
+              const event = JSON.parse(jsonStr);
+              if (event.type === "text") {
+                fullText += event.content;
+                const displayText = fullText.replace(
+                  /<!--FILTERS:[\s\S]*?-->/,
+                  ""
+                );
+                setStreamingText(displayText);
+              } else if (event.type === "listings") {
+                setListings(event.data);
+              } else if (event.type === "error") {
                 setMessages((prev) => [
                   ...prev,
-                  { role: "assistant", content: displayText },
+                  {
+                    role: "assistant",
+                    content: event.content ?? "Si è verificato un errore. Riprova tra poco.",
+                  },
                 ]);
+                setStreamingText("");
+              } else if (event.type === "done") {
+                const displayText = fullText.replace(
+                  /<!--FILTERS:[\s\S]*?-->/,
+                  ""
+                );
+                if (displayText.trim()) {
+                  setMessages((prev) => [
+                    ...prev,
+                    { role: "assistant", content: displayText },
+                  ]);
+                }
+                setStreamingText("");
               }
-              setStreamingText("");
+            } catch {
+              // Skip malformed JSON
             }
-          } catch {
-            // Skip malformed JSON
           }
         }
       }
+
+      // If stream ended without a "done" event and we have accumulated text
+      if (fullText && streamingText) {
+        const displayText = fullText.replace(/<!--FILTERS:[\s\S]*?-->/, "");
+        if (displayText.trim()) {
+          setMessages((prev) => [
+            ...prev,
+            { role: "assistant", content: displayText },
+          ]);
+        }
+        setStreamingText("");
+      }
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
-        // Could be user abort or timeout
         setMessages((prev) => [
           ...prev,
           {
@@ -151,11 +168,15 @@ export function ChatWidget({ sessionId, contextId, welcomeMessage }: Props) {
         setStreamingText("");
         return;
       }
+      const errorMsg =
+        err instanceof Error && err.message
+          ? err.message
+          : "Si è verificato un errore. Riprova tra poco.";
       setMessages((prev) => [
         ...prev,
         {
           role: "assistant",
-          content: "Si è verificato un errore. Riprova tra poco.",
+          content: errorMsg,
         },
       ]);
       setStreamingText("");

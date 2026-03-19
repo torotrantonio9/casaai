@@ -1,6 +1,25 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
+// Paths excluded from rate limiting (during test/dev)
+const RATE_LIMIT_WHITELIST = [
+  "/api/seed",
+  "/api/debug",
+  "/api/listings/search",
+  "/api/leads",
+  "/api/webhooks/",
+  "/api/import",
+  "/api/ai/generate-description",
+  "/api/ai/score-lead",
+  "/api/ai/draft-reply",
+  "/api/ai/fraud-check",
+  "/api/chat/context",
+  "/api/chat/messages",
+  "/api/listings/",
+  "/api/account/",
+  "/api/notifications/",
+];
+
 // In-memory rate limiter (per-instance; use Redis in production for multi-instance)
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
 
@@ -33,12 +52,20 @@ function getClientIP(request: NextRequest): string {
   );
 }
 
+function isWhitelisted(pathname: string): boolean {
+  return RATE_LIMIT_WHITELIST.some((p) => pathname.startsWith(p));
+}
+
 export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
   const ip = getClientIP(request);
 
-  // Rate limit: /api/chat — 20 requests/hour per IP
-  if (pathname === "/api/chat" && request.method === "POST") {
+  // Rate limit: /api/chat — 20 requests/hour per IP (skip whitelisted)
+  if (
+    pathname === "/api/chat" &&
+    request.method === "POST" &&
+    !isWhitelisted(pathname)
+  ) {
     const { allowed, remaining } = checkRateLimit(
       `chat:${ip}`,
       20,
@@ -60,7 +87,6 @@ export async function proxy(request: NextRequest) {
 
   // Rate limit: /api/ai/valuation — 5/day unauthenticated, 20/day authenticated
   if (pathname === "/api/ai/valuation" && request.method === "POST") {
-    // Check auth to determine limit
     const dayMs = 24 * 60 * 60 * 1000;
     const hasAuth = request.cookies
       .getAll()

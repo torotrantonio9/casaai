@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useSyncExternalStore } from "react";
+import Link from "next/link";
 import {
   LineChart,
   Line,
@@ -96,9 +97,12 @@ const STATUS_LABELS: Record<string, string> = {
   closed_lost: "Perso",
 };
 
+const subscribe = () => () => {};
+const getSnapshot = () => true;
+const getServerSnapshot = () => false;
+
 export default function DashboardPage() {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  const mounted = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
   return (
     <div>
@@ -160,12 +164,12 @@ export default function DashboardPage() {
       <div className="mt-6 rounded-xl border border-gray-200 bg-white">
         <div className="flex items-center justify-between border-b px-5 py-4">
           <h2 className="text-sm font-semibold text-gray-900">Lead recenti</h2>
-          <a
+          <Link
             href="/dashboard/lead"
             className="text-xs font-medium text-blue-600 hover:text-blue-700"
           >
             Vedi tutti
-          </a>
+          </Link>
         </div>
         <div className="divide-y">
           {MOCK_LEADS.map((lead) => (
@@ -194,24 +198,24 @@ export default function DashboardPage() {
 
       {/* Quick actions */}
       <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <a
+        <Link
           href="/dashboard/annunci/nuovo"
           className="rounded-lg border border-gray-200 bg-white p-4 text-center text-sm font-medium text-gray-700 hover:bg-gray-50"
         >
           + Pubblica annuncio
-        </a>
-        <a
+        </Link>
+        <Link
           href="/dashboard/lead"
           className="rounded-lg border border-gray-200 bg-white p-4 text-center text-sm font-medium text-gray-700 hover:bg-gray-50"
         >
           Gestisci lead
-        </a>
-        <a
+        </Link>
+        <Link
           href="/dashboard/analytics"
           className="rounded-lg border border-gray-200 bg-white p-4 text-center text-sm font-medium text-gray-700 hover:bg-gray-50"
         >
           Vai ad analytics
-        </a>
+        </Link>
       </div>
     </div>
   );
