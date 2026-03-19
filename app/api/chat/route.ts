@@ -7,7 +7,38 @@ import { semanticSearch, type SearchFilters } from "@/lib/ai/search";
 export const runtime = "nodejs";
 
 export async function POST(request: NextRequest) {
+  const encoder = new TextEncoder();
+
+  // Helper: SSE error response that always sends "done"
+  function sseError(message: string) {
+    const stream = new ReadableStream({
+      start(controller) {
+        const errorEvent = JSON.stringify({ type: "error", content: message });
+        controller.enqueue(encoder.encode(`data: ${errorEvent}\n\n`));
+        const doneEvent = JSON.stringify({ type: "done" });
+        controller.enqueue(encoder.encode(`data: ${doneEvent}\n\n`));
+        controller.close();
+      },
+    });
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      },
+    });
+  }
+
   try {
+    // Validate API key upfront
+    if (!process.env.ANTHROPIC_API_KEY) {
+      console.error("[chat/route] ANTHROPIC_API_KEY mancante o non configurata");
+      return new Response(
+        JSON.stringify({ error: "Configurazione AI mancante. Contatta l'amministratore." }),
+        { status: 500, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
     const body = await request.json();
     const { messages, session_id, context_id } = body;
 
@@ -118,11 +149,16 @@ export async function POST(request: NextRequest) {
     }
 
     // Create a combined stream that sends listings + Claude response
-    const encoder = new TextEncoder();
-    const claudeStream = streamChat({
-      systemPrompt,
-      messages: claudeMessages,
-    });
+    let claudeStream: ReadableStream<Uint8Array>;
+    try {
+      claudeStream = streamChat({
+        systemPrompt,
+        messages: claudeMessages,
+      });
+    } catch (err) {
+      console.error("[chat/route] Errore creazione stream Claude:", err);
+      return sseError("Si è verificato un errore con l'AI. Riprova tra poco.");
+    }
 
     const combinedStream = new ReadableStream({
       async start(controller) {
@@ -145,7 +181,17 @@ export async function POST(request: NextRequest) {
             if (done) break;
             controller.enqueue(value);
           }
+        } catch (streamErr) {
+          console.error("[chat/route] Errore durante streaming Claude:", streamErr);
+          const errorEvent = JSON.stringify({
+            type: "error",
+            content: "Si è verificato un errore durante la generazione della risposta.",
+          });
+          controller.enqueue(encoder.encode(`data: ${errorEvent}\n\n`));
         } finally {
+          // Always send "done" event
+          const doneEvent = JSON.stringify({ type: "done" });
+          controller.enqueue(encoder.encode(`data: ${doneEvent}\n\n`));
           reader.releaseLock();
           controller.close();
         }
@@ -159,7 +205,8 @@ export async function POST(request: NextRequest) {
         Connection: "keep-alive",
       },
     });
-  } catch {
+  } catch (err) {
+    console.error("[chat/route] Errore non gestito:", err);
     return new Response(
       JSON.stringify({ error: "Errore interno del server" }),
       { status: 500, headers: { "Content-Type": "application/json" } }

@@ -2,7 +2,9 @@
  * System prompts centralizzati per tutte le funzionalità AI di CasaAI.
  */
 
-export const CHAT_SYSTEM_PROMPT = `Sei l'assistente AI di CasaAI, il marketplace immobiliare italiano più avanzato.
+export const CHAT_SYSTEM_PROMPT = `IMPORTANTE: Rispondi SEMPRE in italiano. Non usare mai parole inglesi.
+
+Sei l'assistente AI di CasaAI, il marketplace immobiliare italiano più avanzato.
 Il tuo compito è aiutare gli utenti a trovare la casa perfetta attraverso una conversazione naturale.
 
 COMPORTAMENTO:
@@ -24,6 +26,21 @@ Quando rispondi con risultati:
 3. Invito a raffinare o contattare l'agenzia
 
 Se l'utente chiede di confrontare annunci, suggerisci di usare la funzione confronto.`;
+
+const FEATURE_IT: Record<string, string> = {
+  has_elevator: "ascensore",
+  has_parking: "posto auto",
+  has_garden: "giardino",
+  has_terrace: "terrazzo",
+  has_cellar: "cantina",
+  has_pool: "piscina",
+  has_balcony: "balcone",
+  has_ac: "aria condizionata",
+};
+
+function translateFeature(f: string): string {
+  return FEATURE_IT[f] ?? f;
+}
 
 export function buildContextMessage(context: {
   intent: string;
@@ -64,10 +81,10 @@ export function buildContextMessage(context: {
     parts.push(`- Distanza massima: ${context.max_distance_km} km`);
   }
   if (context.must_have.length > 0) {
-    parts.push(`- Imprescindibili: ${context.must_have.join(", ")}`);
+    parts.push(`- Imprescindibili: ${context.must_have.map(translateFeature).join(", ")}`);
   }
   if (context.nice_to_have.length > 0) {
-    parts.push(`- Graditi: ${context.nice_to_have.join(", ")}`);
+    parts.push(`- Graditi: ${context.nice_to_have.map(translateFeature).join(", ")}`);
   }
   if (context.custom_note) {
     parts.push(`- Note aggiuntive: "${context.custom_note}"`);

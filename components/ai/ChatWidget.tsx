@@ -55,6 +55,11 @@ export function ChatWidget({ sessionId, contextId, welcomeMessage }: Props) {
 
     abortRef.current = new AbortController();
 
+    // 30-second timeout
+    const timeoutId = setTimeout(() => {
+      abortRef.current?.abort();
+    }, 30000);
+
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
@@ -71,7 +76,8 @@ export function ChatWidget({ sessionId, contextId, welcomeMessage }: Props) {
       });
 
       if (!res.ok) {
-        throw new Error("Errore nella risposta");
+        const errorBody = await res.json().catch(() => null);
+        throw new Error(errorBody?.error ?? `Errore ${res.status}`);
       }
 
       const reader = res.body?.getReader();
@@ -104,15 +110,27 @@ export function ChatWidget({ sessionId, contextId, welcomeMessage }: Props) {
               setStreamingText(displayText);
             } else if (event.type === "listings") {
               setListings(event.data);
+            } else if (event.type === "error") {
+              // Server-sent error — show in chat
+              setMessages((prev) => [
+                ...prev,
+                {
+                  role: "assistant",
+                  content: event.content ?? "Si è verificato un errore. Riprova tra poco.",
+                },
+              ]);
+              setStreamingText("");
             } else if (event.type === "done") {
               const displayText = fullText.replace(
                 /<!--FILTERS:[\s\S]*?-->/,
                 ""
               );
-              setMessages((prev) => [
-                ...prev,
-                { role: "assistant", content: displayText },
-              ]);
+              if (displayText.trim()) {
+                setMessages((prev) => [
+                  ...prev,
+                  { role: "assistant", content: displayText },
+                ]);
+              }
               setStreamingText("");
             }
           } catch {
@@ -121,15 +139,28 @@ export function ChatWidget({ sessionId, contextId, welcomeMessage }: Props) {
         }
       }
     } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") return;
+      if (err instanceof DOMException && err.name === "AbortError") {
+        // Could be user abort or timeout
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            content: "La risposta ha impiegato troppo tempo. Riprova tra poco.",
+          },
+        ]);
+        setStreamingText("");
+        return;
+      }
       setMessages((prev) => [
         ...prev,
         {
           role: "assistant",
-          content: "Mi dispiace, si è verificato un errore. Riprova tra poco.",
+          content: "Si è verificato un errore. Riprova tra poco.",
         },
       ]);
+      setStreamingText("");
     } finally {
+      clearTimeout(timeoutId);
       setIsStreaming(false);
       abortRef.current = null;
     }
