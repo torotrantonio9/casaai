@@ -96,6 +96,17 @@ export function ChatOnboarding({ onComplete, onSkip }: Props) {
     });
   }
 
+  const selectedStyle = {
+    borderColor: "#1e40af",
+    background: "#1e40af",
+    color: "#ffffff",
+  };
+  const unselectedStyle = {
+    borderColor: "#cbd5e1",
+    background: "#ffffff",
+    color: "#1e293b",
+  };
+
   return (
     <div className="mx-auto w-full max-w-lg">
       {/* Progress bar */}
@@ -103,12 +114,11 @@ export function ChatOnboarding({ onComplete, onSkip }: Props) {
         {Array.from({ length: totalSteps }).map((_, i) => (
           <div
             key={i}
-            className={`h-1.5 flex-1 rounded-full transition-colors ${
-              i <= step ? "bg-blue-600" : "bg-gray-200"
-            }`}
+            className="h-1.5 flex-1 rounded-full transition-colors"
+            style={{ background: i <= step ? "#1e40af" : "#e2e8f0" }}
           />
         ))}
-        <span className="ml-2 text-xs text-gray-500">
+        <span className="ml-2 text-xs" style={{ color: "#64748b" }}>
           {step + 1}/{totalSteps}
         </span>
       </div>
@@ -124,7 +134,7 @@ export function ChatOnboarding({ onComplete, onSkip }: Props) {
           {/* Step 0: Intent */}
           {step === 0 && (
             <div className="space-y-4">
-              <h3 className="text-xl font-semibold text-gray-900">
+              <h3 className="text-xl font-bold" style={{ color: "#1a1a2e" }}>
                 Stai cercando per...
               </h3>
               <div className="grid grid-cols-2 gap-3">
@@ -138,16 +148,17 @@ export function ChatOnboarding({ onComplete, onSkip }: Props) {
                         budget_max: intent === "rent" ? 1500 : 300000,
                       }));
                     }}
-                    className={`rounded-xl border-2 p-4 text-center transition-all ${
+                    className="rounded-xl border-2 p-4 text-center transition-all"
+                    style={
                       context.intent === intent
-                        ? "border-blue-600 bg-blue-50 text-blue-700"
-                        : "border-gray-200 hover:border-gray-300"
-                    }`}
+                        ? selectedStyle
+                        : unselectedStyle
+                    }
                   >
                     <span className="text-2xl">
                       {intent === "sale" ? "\u{1F3E0}" : "\u{1F511}"}
                     </span>
-                    <p className="mt-1 font-medium">
+                    <p className="mt-1 font-semibold">
                       {intent === "sale" ? "Acquisto" : "Affitto"}
                     </p>
                   </button>
@@ -159,11 +170,11 @@ export function ChatOnboarding({ onComplete, onSkip }: Props) {
           {/* Step 1: Budget */}
           {step === 1 && (
             <div className="space-y-4">
-              <h3 className="text-xl font-semibold text-gray-900">
+              <h3 className="text-xl font-bold" style={{ color: "#1a1a2e" }}>
                 Qual è il tuo budget massimo?
               </h3>
               <div className="text-center">
-                <span className="text-3xl font-bold text-blue-600">
+                <span className="text-3xl font-bold" style={{ color: "#1e40af" }}>
                   {formatPrice(context.budget_max)}
                   {budgetConfig.label}
                 </span>
@@ -180,9 +191,10 @@ export function ChatOnboarding({ onComplete, onSkip }: Props) {
                     budget_max: Number(e.target.value),
                   }))
                 }
-                className="w-full accent-blue-600"
+                className="w-full"
+                style={{ accentColor: "#1e40af" }}
               />
-              <div className="flex justify-between text-xs text-gray-500">
+              <div className="flex justify-between text-xs" style={{ color: "#64748b" }}>
                 <span>{formatPrice(budgetConfig.min)}</span>
                 <span>{formatPrice(budgetConfig.max)}</span>
               </div>
@@ -192,7 +204,7 @@ export function ChatOnboarding({ onComplete, onSkip }: Props) {
           {/* Step 2: Location + Distance */}
           {step === 2 && (
             <div className="space-y-4">
-              <h3 className="text-xl font-semibold text-gray-900">
+              <h3 className="text-xl font-bold" style={{ color: "#1a1a2e" }}>
                 Da dove vuoi partire?
               </h3>
               <input
@@ -209,15 +221,16 @@ export function ChatOnboarding({ onComplete, onSkip }: Props) {
                     },
                   }))
                 }
-                className="w-full rounded-lg border border-gray-300 px-4 py-3 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+                style={{ color: "#1a1a2e", background: "#ffffff", borderColor: "#cbd5e1" }}
+                className="w-full rounded-lg border px-4 py-3 text-sm focus:outline-none"
               />
-              <p className="text-xs text-gray-400">
+              <p className="text-xs" style={{ color: "#94a3b8" }}>
                 L&apos;autocomplete Google Places sarà integrato in fase
                 successiva
               </p>
 
               <div>
-                <p className="mb-2 text-sm font-medium text-gray-700">
+                <p className="mb-2 text-sm font-medium" style={{ color: "#1e293b" }}>
                   Distanza massima:
                 </p>
                 <div className="flex gap-2">
@@ -227,11 +240,12 @@ export function ChatOnboarding({ onComplete, onSkip }: Props) {
                       onClick={() =>
                         setContext((p) => ({ ...p, max_distance_km: km }))
                       }
-                      className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-all ${
+                      className="flex-1 rounded-lg border-2 px-3 py-2 text-sm font-semibold transition-all"
+                      style={
                         context.max_distance_km === km
-                          ? "border-blue-600 bg-blue-50 text-blue-700"
-                          : "border-gray-200 text-gray-600 hover:border-gray-300"
-                      }`}
+                          ? selectedStyle
+                          : unselectedStyle
+                      }
                     >
                       {km}km
                     </button>
@@ -244,10 +258,10 @@ export function ChatOnboarding({ onComplete, onSkip }: Props) {
           {/* Step 3: Features */}
           {step === 3 && (
             <div className="space-y-4">
-              <h3 className="text-xl font-semibold text-gray-900">
+              <h3 className="text-xl font-bold" style={{ color: "#1a1a2e" }}>
                 Cosa non può mancare?
               </h3>
-              <p className="text-sm text-gray-500">
+              <p className="text-sm" style={{ color: "#64748b" }}>
                 Seleziona tutto ciò che vuoi
               </p>
               <div className="grid grid-cols-2 gap-2">
@@ -255,11 +269,12 @@ export function ChatOnboarding({ onComplete, onSkip }: Props) {
                   <button
                     key={f.key}
                     onClick={() => toggleFeature(f.key)}
-                    className={`rounded-lg border px-3 py-2.5 text-left text-sm transition-all ${
+                    className="rounded-lg border-2 px-3 py-2.5 text-left text-sm transition-all"
+                    style={
                       context.must_have.includes(f.key)
-                        ? "border-blue-600 bg-blue-50 text-blue-700"
-                        : "border-gray-200 text-gray-600 hover:border-gray-300"
-                    }`}
+                        ? selectedStyle
+                        : unselectedStyle
+                    }
                   >
                     <span className="mr-1.5">{f.emoji}</span>
                     {f.label}
@@ -268,7 +283,7 @@ export function ChatOnboarding({ onComplete, onSkip }: Props) {
               </div>
 
               <div>
-                <label className="mb-1 block text-sm font-medium text-gray-700">
+                <label className="mb-1 block text-sm font-medium" style={{ color: "#1e293b" }}>
                   Esigenze speciali (opzionale)
                 </label>
                 <textarea
@@ -278,7 +293,8 @@ export function ChatOnboarding({ onComplete, onSkip }: Props) {
                   }
                   placeholder='es. "vicino a buone scuole elementari"'
                   rows={2}
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+                  style={{ color: "#1a1a2e", background: "#ffffff", borderColor: "#cbd5e1" }}
+                  className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none"
                 />
               </div>
             </div>
@@ -291,14 +307,18 @@ export function ChatOnboarding({ onComplete, onSkip }: Props) {
         <button
           onClick={prev}
           disabled={step === 0}
-          className="text-sm text-gray-500 hover:text-gray-700 disabled:invisible"
+          className="text-sm font-medium disabled:invisible"
+          style={{ color: "#64748b" }}
         >
           Indietro
         </button>
 
         <button
           onClick={next}
-          className="rounded-lg bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"
+          className="rounded-lg px-6 py-2.5 text-sm font-semibold text-white"
+          style={{ background: "#1e40af" }}
+          onMouseEnter={(e) => (e.currentTarget.style.background = "#1d3461")}
+          onMouseLeave={(e) => (e.currentTarget.style.background = "#1e40af")}
         >
           {step === totalSteps - 1 ? "Avvia la ricerca" : "Avanti"}
         </button>
@@ -306,7 +326,8 @@ export function ChatOnboarding({ onComplete, onSkip }: Props) {
 
       <button
         onClick={onSkip}
-        className="mt-4 block w-full text-center text-xs text-gray-400 hover:text-gray-600"
+        className="mt-4 block w-full text-center text-xs"
+        style={{ color: "#94a3b8" }}
       >
         Salta e parla direttamente con l&apos;AI
       </button>

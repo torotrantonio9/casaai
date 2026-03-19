@@ -7,9 +7,19 @@ interface Props {
   sessionId: string | null;
   contextId: string | null;
   welcomeMessage?: string;
+  autoMessage?: string;
+  inputPlaceholder?: string;
+  initialDisabled?: boolean;
 }
 
-export function ChatWidget({ sessionId, contextId, welcomeMessage }: Props) {
+export function ChatWidget({
+  sessionId,
+  contextId,
+  welcomeMessage,
+  autoMessage,
+  inputPlaceholder,
+  initialDisabled = false,
+}: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>(() => {
     if (welcomeMessage) {
       return [{ role: "assistant", content: welcomeMessage }];
@@ -26,8 +36,13 @@ export function ChatWidget({ sessionId, contextId, welcomeMessage }: Props) {
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingText, setStreamingText] = useState("");
   const [listings, setListings] = useState<ListingCard[]>([]);
+  const [inputEnabled, setInputEnabled] = useState(!initialDisabled);
+  const [customPlaceholder, setCustomPlaceholder] = useState(
+    inputPlaceholder ?? "Descrivi la casa dei tuoi sogni..."
+  );
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const autoSentRef = useRef(false);
 
   const scrollToBottom = useCallback(() => {
     scrollRef.current?.scrollTo({
@@ -40,6 +55,161 @@ export function ChatWidget({ sessionId, contextId, welcomeMessage }: Props) {
     scrollToBottom();
   }, [messages, streamingText, scrollToBottom]);
 
+  const streamChatMessage = useCallback(
+    async (
+      allMessages: ChatMessage[],
+      options?: { hidden?: boolean; onDone?: () => void }
+    ) => {
+      setIsStreaming(true);
+      setStreamingText("");
+      setListings([]);
+
+      abortRef.current = new AbortController();
+      const timeoutId = setTimeout(() => abortRef.current?.abort(), 45000);
+
+      try {
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messages: allMessages.map((m) => ({
+              role: m.role,
+              content: m.content,
+            })),
+            session_id: sessionId,
+            context_id: contextId,
+          }),
+          signal: abortRef.current.signal,
+        });
+
+        if (!res.ok) {
+          const errorBody = await res.json().catch(() => null);
+          throw new Error(errorBody?.error ?? `Errore ${res.status}`);
+        }
+
+        const reader = res.body?.getReader();
+        if (!reader) throw new Error("Nessuna risposta dal server");
+
+        const decoder = new TextDecoder();
+        let fullText = "";
+        let sseBuffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          sseBuffer += decoder.decode(value, { stream: true });
+          const parts = sseBuffer.split("\n\n");
+          sseBuffer = parts.pop() ?? "";
+
+          for (const part of parts) {
+            const lines = part.split("\n");
+            for (const line of lines) {
+              if (!line.startsWith("data: ")) continue;
+              const jsonStr = line.slice(6).trim();
+              if (!jsonStr) continue;
+
+              try {
+                const event = JSON.parse(jsonStr);
+                if (event.type === "text") {
+                  fullText += event.content;
+                  const displayText = fullText.replace(
+                    /<!--FILTERS:[\s\S]*?-->/,
+                    ""
+                  );
+                  setStreamingText(displayText);
+                } else if (event.type === "listings") {
+                  setListings(event.data);
+                } else if (event.type === "error") {
+                  setMessages((prev) => [
+                    ...prev,
+                    {
+                      role: "assistant",
+                      content:
+                        event.content ??
+                        "Si è verificato un errore. Riprova tra poco.",
+                    },
+                  ]);
+                  setStreamingText("");
+                } else if (event.type === "done") {
+                  const displayText = fullText.replace(
+                    /<!--FILTERS:[\s\S]*?-->/,
+                    ""
+                  );
+                  if (displayText.trim()) {
+                    setMessages((prev) => [
+                      ...prev,
+                      { role: "assistant", content: displayText },
+                    ]);
+                  }
+                  setStreamingText("");
+                }
+              } catch {
+                // Skip malformed JSON
+              }
+            }
+          }
+        }
+
+        if (fullText) {
+          const displayText = fullText.replace(/<!--FILTERS:[\s\S]*?-->/, "");
+          if (displayText.trim() && streamingText) {
+            setMessages((prev) => [
+              ...prev,
+              { role: "assistant", content: displayText },
+            ]);
+            setStreamingText("");
+          }
+        }
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") {
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: "assistant",
+              content:
+                "La risposta ha impiegato troppo tempo. Riprova tra poco.",
+            },
+          ]);
+          setStreamingText("");
+          return;
+        }
+        const errorMsg =
+          err instanceof Error && err.message
+            ? err.message
+            : "Si è verificato un errore. Riprova tra poco.";
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: errorMsg },
+        ]);
+        setStreamingText("");
+      } finally {
+        clearTimeout(timeoutId);
+        setIsStreaming(false);
+        abortRef.current = null;
+        options?.onDone?.();
+      }
+    },
+    [sessionId, contextId, streamingText]
+  );
+
+  // Auto-send message after wizard completion
+  useEffect(() => {
+    if (autoMessage && !autoSentRef.current && sessionId) {
+      autoSentRef.current = true;
+      const autoMsg: ChatMessage = { role: "user", content: autoMessage };
+      // Don't show auto-message in chat — it's hidden
+      const allMsgs = [...messages, autoMsg];
+      streamChatMessage(allMsgs, {
+        hidden: true,
+        onDone: () => {
+          setInputEnabled(true);
+          setCustomPlaceholder("Vuoi affinare la ricerca? Chiedi all'AI...");
+        },
+      });
+    }
+  }, [autoMessage, sessionId, messages, streamChatMessage]);
+
   async function sendMessage(e: React.FormEvent) {
     e.preventDefault();
     const text = input.trim();
@@ -49,142 +219,8 @@ export function ChatWidget({ sessionId, contextId, welcomeMessage }: Props) {
     const newMessages = [...messages, userMessage];
     setMessages(newMessages);
     setInput("");
-    setIsStreaming(true);
-    setStreamingText("");
-    setListings([]);
 
-    abortRef.current = new AbortController();
-
-    // 45-second timeout
-    const timeoutId = setTimeout(() => {
-      abortRef.current?.abort();
-    }, 45000);
-
-    try {
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: newMessages.map((m) => ({
-            role: m.role,
-            content: m.content,
-          })),
-          session_id: sessionId,
-          context_id: contextId,
-        }),
-        signal: abortRef.current.signal,
-      });
-
-      if (!res.ok) {
-        const errorBody = await res.json().catch(() => null);
-        throw new Error(errorBody?.error ?? `Errore ${res.status}`);
-      }
-
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error("Nessuna risposta dal server");
-
-      const decoder = new TextDecoder();
-      let fullText = "";
-      let sseBuffer = ""; // Buffer to handle chunks split across SSE boundaries
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        sseBuffer += decoder.decode(value, { stream: true });
-
-        // Process complete SSE lines (terminated by \n\n)
-        const parts = sseBuffer.split("\n\n");
-        // Keep the last part as buffer (may be incomplete)
-        sseBuffer = parts.pop() ?? "";
-
-        for (const part of parts) {
-          const lines = part.split("\n");
-          for (const line of lines) {
-            if (!line.startsWith("data: ")) continue;
-            const jsonStr = line.slice(6).trim();
-            if (!jsonStr) continue;
-
-            try {
-              const event = JSON.parse(jsonStr);
-              if (event.type === "text") {
-                fullText += event.content;
-                const displayText = fullText.replace(
-                  /<!--FILTERS:[\s\S]*?-->/,
-                  ""
-                );
-                setStreamingText(displayText);
-              } else if (event.type === "listings") {
-                setListings(event.data);
-              } else if (event.type === "error") {
-                setMessages((prev) => [
-                  ...prev,
-                  {
-                    role: "assistant",
-                    content: event.content ?? "Si è verificato un errore. Riprova tra poco.",
-                  },
-                ]);
-                setStreamingText("");
-              } else if (event.type === "done") {
-                const displayText = fullText.replace(
-                  /<!--FILTERS:[\s\S]*?-->/,
-                  ""
-                );
-                if (displayText.trim()) {
-                  setMessages((prev) => [
-                    ...prev,
-                    { role: "assistant", content: displayText },
-                  ]);
-                }
-                setStreamingText("");
-              }
-            } catch {
-              // Skip malformed JSON
-            }
-          }
-        }
-      }
-
-      // If stream ended without a "done" event and we have accumulated text
-      if (fullText && streamingText) {
-        const displayText = fullText.replace(/<!--FILTERS:[\s\S]*?-->/, "");
-        if (displayText.trim()) {
-          setMessages((prev) => [
-            ...prev,
-            { role: "assistant", content: displayText },
-          ]);
-        }
-        setStreamingText("");
-      }
-    } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") {
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: "assistant",
-            content: "La risposta ha impiegato troppo tempo. Riprova tra poco.",
-          },
-        ]);
-        setStreamingText("");
-        return;
-      }
-      const errorMsg =
-        err instanceof Error && err.message
-          ? err.message
-          : "Si è verificato un errore. Riprova tra poco.";
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: errorMsg,
-        },
-      ]);
-      setStreamingText("");
-    } finally {
-      clearTimeout(timeoutId);
-      setIsStreaming(false);
-      abortRef.current = null;
-    }
+    await streamChatMessage(newMessages);
   }
 
   return (
@@ -192,7 +228,7 @@ export function ChatWidget({ sessionId, contextId, welcomeMessage }: Props) {
       {/* Header */}
       <div className="flex items-center gap-2 border-b border-gray-100 px-4 py-3">
         <div className="h-2.5 w-2.5 rounded-full bg-green-500" />
-        <h3 className="text-sm font-semibold text-gray-900">
+        <h3 className="text-sm font-semibold" style={{ color: "#1a1a2e" }}>
           Assistente CasaAI
         </h3>
       </div>
@@ -216,14 +252,21 @@ export function ChatWidget({ sessionId, contextId, welcomeMessage }: Props) {
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="Descrivi la casa dei tuoi sogni..."
-          disabled={isStreaming}
-          className="flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none disabled:opacity-50"
+          placeholder={customPlaceholder}
+          disabled={isStreaming || !inputEnabled}
+          style={{ color: "#1a1a2e", background: "#ffffff" }}
+          className="flex-1 rounded-lg border px-3 py-2 text-sm focus:ring-1 focus:outline-none disabled:opacity-50"
+          // Explicit inline border colors for clarity
+          onFocus={(e) => (e.currentTarget.style.borderColor = "#1e40af")}
+          onBlur={(e) => (e.currentTarget.style.borderColor = "#cbd5e1")}
         />
         <button
           type="submit"
-          disabled={isStreaming || !input.trim()}
-          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          disabled={isStreaming || !input.trim() || !inputEnabled}
+          className="rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          style={{ background: "#1e40af" }}
+          onMouseEnter={(e) => (e.currentTarget.style.background = "#1d3461")}
+          onMouseLeave={(e) => (e.currentTarget.style.background = "#1e40af")}
         >
           Invia
         </button>

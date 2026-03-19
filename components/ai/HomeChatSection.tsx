@@ -5,11 +5,25 @@ import { AnimatePresence, motion } from "framer-motion";
 import { ChatOnboarding, type ChatContext } from "./ChatOnboarding";
 import { ChatWidget } from "./ChatWidget";
 
+const FEATURE_LABELS: Record<string, string> = {
+  has_elevator: "ascensore",
+  has_parking: "posto auto",
+  has_garden: "giardino",
+  has_terrace: "terrazzo",
+  has_cellar: "cantina",
+  has_pool: "piscina",
+  pet_friendly: "animali ammessi",
+  accessible: "accessibile",
+  ground_floor: "piano terra",
+  energy_class_ab: "classe energetica A/B",
+};
+
 export function HomeChatSection() {
   const [phase, setPhase] = useState<"onboarding" | "chat">("onboarding");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [contextId, setContextId] = useState<string | null>(null);
   const [welcomeMessage, setWelcomeMessage] = useState<string | undefined>();
+  const [autoMessage, setAutoMessage] = useState<string | undefined>();
 
   const handleComplete = useCallback(async (context: ChatContext) => {
     try {
@@ -36,11 +50,16 @@ export function HomeChatSection() {
           : "";
         const featuresLabel =
           context.must_have.length > 0
-            ? `, con ${context.must_have.map((f) => f.replace("has_", "").replace("_", " ")).join(", ")}`
+            ? `, con ${context.must_have.map((f) => FEATURE_LABELS[f] ?? f).join(", ")}`
             : "";
 
         setWelcomeMessage(
-          `Ciao! Ho già impostato la tua ricerca: ${intentLabel} fino a ${budgetLabel}${locationLabel}${featuresLabel}. Vuoi dirmi altro o vuoi che ti mostri subito le prime proposte?`
+          `Perfetto! Ho impostato la tua ricerca: ${intentLabel} fino a ${budgetLabel}${locationLabel}${featuresLabel}. Sto cercando le migliori proposte per te...`
+        );
+
+        // Auto-trigger first search
+        setAutoMessage(
+          "Mostrami subito i migliori annunci disponibili in base alle mie preferenze"
         );
       }
     } catch {
@@ -54,9 +73,9 @@ export function HomeChatSection() {
   }, []);
 
   return (
-    <section className="bg-gradient-to-b from-white to-blue-50 py-16">
+    <section className="py-16" style={{ background: "linear-gradient(to bottom, #ffffff, #eff6ff)" }}>
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <h2 className="mb-8 text-center text-3xl font-bold text-gray-900">
+        <h2 className="mb-8 text-center text-3xl font-bold" style={{ color: "#1a1a2e" }}>
           {phase === "onboarding"
             ? "Iniziamo la ricerca"
             : "Parla con l'AI"}
@@ -69,7 +88,8 @@ export function HomeChatSection() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0, x: -50 }}
-              className="mx-auto max-w-lg rounded-2xl border border-gray-200 bg-white p-6 shadow-lg"
+              className="mx-auto max-w-lg rounded-2xl border bg-white p-6 shadow-lg"
+              style={{ borderColor: "#e2e8f0" }}
             >
               <ChatOnboarding
                 onComplete={handleComplete}
@@ -81,12 +101,15 @@ export function HomeChatSection() {
               key="chat"
               initial={{ opacity: 0, x: 50 }}
               animate={{ opacity: 1, x: 0 }}
-              className="mx-auto h-[500px] max-w-2xl"
+              className="mx-auto h-[550px] max-w-2xl"
             >
               <ChatWidget
                 sessionId={sessionId}
                 contextId={contextId}
                 welcomeMessage={welcomeMessage}
+                autoMessage={autoMessage}
+                initialDisabled={!!autoMessage}
+                inputPlaceholder="Vuoi affinare la ricerca? Chiedi all'AI..."
               />
             </motion.div>
           )}

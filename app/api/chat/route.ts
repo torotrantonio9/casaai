@@ -100,12 +100,33 @@ export async function POST(request: NextRequest) {
     let listingsData: string = "";
     let listingsForClient: unknown[] = [];
 
+    // Detect auto-trigger from wizard completion
+    const isAutoTrigger =
+      lastUserMessage?.content?.includes("Mostrami subito i migliori annunci");
+
     if (lastUserMessage) {
+      // More results + looser filters for wizard auto-trigger
+      const searchLimit = isAutoTrigger ? 8 : 5;
+      const adjustedFilters = { ...searchFilters };
+      if (isAutoTrigger) {
+        // Widen budget ±20%
+        if (adjustedFilters.price_max) {
+          adjustedFilters.price_max = Math.round(adjustedFilters.price_max * 1.2);
+        }
+        if (adjustedFilters.price_min) {
+          adjustedFilters.price_min = Math.round(adjustedFilters.price_min * 0.8);
+        }
+        // Widen radius +5km
+        if (adjustedFilters.max_distance_km) {
+          adjustedFilters.max_distance_km += 5;
+        }
+      }
+
       try {
         const results = await semanticSearch(
           lastUserMessage.content,
-          searchFilters,
-          5
+          adjustedFilters,
+          searchLimit
         );
 
         if (results.length > 0) {
@@ -146,6 +167,11 @@ export async function POST(request: NextRequest) {
       if (last.role === "user") {
         last.content += listingsData;
       }
+    }
+
+    // For wizard auto-trigger, prepend instruction to start with results
+    if (isAutoTrigger) {
+      systemPrompt += `\n\nL'utente ha appena completato il wizard di configurazione. Inizia SUBITO con "Ecco le migliori proposte che ho trovato per te:" e presenta i risultati senza fare domande aggiuntive. Se non ci sono risultati, suggerisci di ampliare la ricerca.`;
     }
 
     // Create a combined stream that sends listings + Claude response
