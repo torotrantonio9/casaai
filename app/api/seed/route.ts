@@ -26,6 +26,15 @@ const LISTINGS_DATA = [
   { title: "Rustico da ristrutturare Irpinia", type: "sale" as const, property_type: "house" as const, price: 65000, surface_sqm: 120, rooms: 4, bathrooms: 1, floor: 0, total_floors: 2, year_built: 1940, energy_class: "G", heating_type: "assente", has_parking: true, has_garden: true, has_terrace: false, has_elevator: false, has_cellar: true, address: "Contrada San Marco 5", city: "Montella", province: "AV", zip_code: "83048", lat: 40.8450, lng: 15.0170, neighborhood: "Contrada San Marco", photos: [], status: "active" },
 ];
 
+// TEMPORANEO: GET senza auth per seed su Vercel preview
+export async function GET() {
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
+  if (!appUrl.includes("vercel.app")) {
+    return NextResponse.json({ error: "GET seed consentito solo su vercel.app" }, { status: 403 });
+  }
+  return runSeed();
+}
+
 export async function POST(request: NextRequest) {
   // Check authorization
   const isDev = process.env.NODE_ENV === "development";
@@ -39,6 +48,10 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  return runSeed();
+}
+
+async function runSeed() {
   const supabase = createAdminClient();
 
   // Create a placeholder embedding (1536 zeros)
