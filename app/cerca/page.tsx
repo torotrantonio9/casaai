@@ -238,9 +238,17 @@ export default function CercaPage() {
             </select>
           </div>
 
-          {/* Map placeholder (lazy loaded in production) */}
-          <div className="mb-6 flex h-64 items-center justify-center rounded-xl border border-gray-200 bg-gray-50 text-sm text-gray-400">
-            Mappa Mapbox (caricamento lazy - richiede NEXT_PUBLIC_MAPBOX_TOKEN)
+          {/* Map placeholder */}
+          <div className="mb-6 flex h-64 flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 bg-gray-50/50">
+            <svg className="mb-3 h-10 w-10 text-gray-300" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 6.75V15m6-6v8.25m.503 3.498l4.875-2.437c.381-.19.622-.58.622-1.006V4.82c0-.836-.88-1.38-1.628-1.006l-3.869 1.934c-.317.159-.69.159-1.006 0L9.503 3.252a1.125 1.125 0 00-1.006 0L3.622 5.689C3.24 5.88 3 6.27 3 6.695V19.18c0 .836.88 1.38 1.628 1.006l3.869-1.934c.317-.159.69-.159 1.006 0l4.994 2.497c.317.158.69.158 1.006 0z" />
+            </svg>
+            <p className="text-sm font-medium text-gray-400">
+              Configura Mapbox per visualizzare la mappa
+            </p>
+            <p className="mt-1 text-xs text-gray-300">
+              Aggiungi NEXT_PUBLIC_MAPBOX_TOKEN nelle variabili d&apos;ambiente
+            </p>
           </div>
 
           {/* Results grid */}
