@@ -34,7 +34,7 @@ export function streamChat({
       try {
         const client = getAnthropic();
         const stream = client.messages.stream({
-          model: "claude-sonnet-4-6-20250514",
+          model: "claude-sonnet-4-5-20251022",
           max_tokens: maxTokens,
           system: systemPrompt,
           messages: messages.map((m) => ({
@@ -83,7 +83,7 @@ export async function chatJSON<T>(options: {
 }): Promise<T> {
   const client = getAnthropic();
   const response = await client.messages.create({
-    model: "claude-sonnet-4-6-20250514",
+    model: "claude-sonnet-4-5-20251022",
     max_tokens: options.maxTokens ?? 2048,
     system: options.systemPrompt,
     messages: [{ role: "user", content: options.userMessage }],

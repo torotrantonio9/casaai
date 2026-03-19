@@ -37,7 +37,7 @@ export async function GET() {
       const { default: Anthropic } = await import("@anthropic-ai/sdk");
       const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
       const response = await client.messages.create({
-        model: "claude-sonnet-4-6-20250514",
+        model: "claude-sonnet-4-5-20251022",
         max_tokens: 5,
         messages: [{ role: "user", content: "Rispondi solo: ok" }],
       });
