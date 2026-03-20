@@ -1,22 +1,45 @@
 import { NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { streamChat } from "@/lib/ai/claude";
-import { CHAT_SYSTEM_PROMPT, buildContextMessage } from "@/lib/ai/prompts";
+import { buildContextMessage } from "@/lib/ai/prompts";
 import { semanticSearch, type SearchFilters } from "@/lib/ai/search";
 
 export const runtime = "nodejs";
 
+/* ─── Clean system prompt: NO hidden JSON instructions ─── */
+const SYSTEM_BASE = `IMPORTANTE: Rispondi SEMPRE in italiano. Non usare mai parole inglesi.
+
+Sei l'assistente AI di CasaAI, il marketplace immobiliare italiano più avanzato.
+Il tuo compito è aiutare gli utenti a trovare la casa perfetta attraverso una conversazione naturale.
+
+COMPORTAMENTO:
+- Parla sempre in italiano, in modo friendly e professionale
+- Il contesto base è già stato raccolto (budget, zona, esigenze) — non ripetere queste domande
+- Fai al massimo 1-2 domande di follow-up per dettagli mancanti (locali, piano, stile)
+- Quando hai abbastanza informazioni, commenta i risultati trovati
+- Spiega PERCHÉ ogni immobile è compatibile con le esigenze dell'utente
+- NON includere mai JSON, HTML o commenti nascosti nella tua risposta
+- Scrivi SOLO testo leggibile dall'utente
+
+Quando presenti risultati di ricerca:
+1. Breve intro personalizzata che fa riferimento alle preferenze dell'utente
+2. Per ogni risultato, una breve descrizione (2-3 righe) del perché è compatibile
+3. Invito a raffinare o contattare l'agenzia`;
+
 export async function POST(request: NextRequest) {
   const encoder = new TextEncoder();
+
+  // Helper: send one SSE event
+  function sseEncode(obj: object): Uint8Array {
+    return encoder.encode(`data: ${JSON.stringify(obj)}\n\n`);
+  }
 
   // Helper: SSE error response that always sends "done"
   function sseError(message: string) {
     const stream = new ReadableStream({
       start(controller) {
-        const errorEvent = JSON.stringify({ type: "error", content: message });
-        controller.enqueue(encoder.encode(`data: ${errorEvent}\n\n`));
-        const doneEvent = JSON.stringify({ type: "done" });
-        controller.enqueue(encoder.encode(`data: ${doneEvent}\n\n`));
+        controller.enqueue(sseEncode({ type: "error", content: message }));
+        controller.enqueue(sseEncode({ type: "done" }));
         controller.close();
       },
     });
@@ -32,7 +55,7 @@ export async function POST(request: NextRequest) {
   try {
     // Validate API key upfront
     if (!process.env.ANTHROPIC_API_KEY) {
-      console.error("[chat/route] ANTHROPIC_API_KEY mancante o non configurata");
+      console.error("[chat/route] ANTHROPIC_API_KEY mancante");
       return new Response(
         JSON.stringify({ error: "Configurazione AI mancante. Contatta l'amministratore." }),
         { status: 500, headers: { "Content-Type": "application/json" } }
@@ -49,77 +72,86 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    let systemPrompt = CHAT_SYSTEM_PROMPT;
-
-    // Load context if provided
+    // ─── STEP 1: Build system prompt from context ───
+    let systemPrompt = SYSTEM_BASE;
     let searchFilters: SearchFilters = {};
 
-    if (context_id || session_id) {
+    if (session_id) {
       const supabase = createAdminClient();
+      const { data: ctx } = await supabase
+        .from("chat_contexts")
+        .select("*")
+        .eq("session_id", session_id)
+        .single();
 
-      // Try loading from chat_contexts using session_id
-      if (session_id) {
-        const { data: ctx } = await supabase
-          .from("chat_contexts")
-          .select("*")
-          .eq("session_id", session_id)
-          .single();
+      if (ctx) {
+        const contextMessage = buildContextMessage({
+          intent: ctx.intent,
+          budget_min: ctx.budget_min,
+          budget_max: ctx.budget_max,
+          location_label: ctx.location_label,
+          location_lat: ctx.location_lat,
+          location_lng: ctx.location_lng,
+          max_distance_km: ctx.max_distance_km,
+          must_have: ctx.must_have ?? [],
+          nice_to_have: ctx.nice_to_have ?? [],
+          who_is_searching: ctx.who_is_searching ?? undefined,
+          rooms_needed: ctx.rooms_needed ?? undefined,
+          smart_working: ctx.smart_working ?? false,
+        });
+        systemPrompt = `${SYSTEM_BASE}\n\n${contextMessage}`;
 
-        if (ctx) {
-          const contextMessage = buildContextMessage({
-            intent: ctx.intent,
-            budget_min: ctx.budget_min,
-            budget_max: ctx.budget_max,
-            location_label: ctx.location_label,
-            location_lat: ctx.location_lat,
-            location_lng: ctx.location_lng,
-            max_distance_km: ctx.max_distance_km,
-            must_have: ctx.must_have ?? [],
-            nice_to_have: ctx.nice_to_have ?? [],
-            who_is_searching: ctx.who_is_searching ?? undefined,
-            rooms_needed: ctx.rooms_needed ?? undefined,
-            smart_working: ctx.smart_working ?? false,
-          });
-          systemPrompt = `${CHAT_SYSTEM_PROMPT}\n\n${contextMessage}`;
-
-          searchFilters = {
-            type: ctx.intent === "sale" ? "sale" : "rent",
-            price_max: ctx.budget_max,
-            price_min: ctx.budget_min ?? undefined,
-            lat: ctx.location_lat ?? undefined,
-            lng: ctx.location_lng ?? undefined,
-            max_distance_km: ctx.max_distance_km ?? undefined,
-            features: ctx.must_have ?? [],
-          };
-        }
+        searchFilters = {
+          type: ctx.intent === "sale" ? "sale" : "rent",
+          price_max: ctx.budget_max,
+          price_min: ctx.budget_min ?? undefined,
+          lat: ctx.location_lat ?? undefined,
+          lng: ctx.location_lng ?? undefined,
+          max_distance_km: ctx.max_distance_km ?? undefined,
+          features: ctx.must_have ?? [],
+        };
       }
     }
 
-    // Try to extract the user's latest message for semantic search
+    // ─── STEP 2: Search listings in DB BEFORE streaming ───
     const lastUserMessage = [...messages]
       .reverse()
       .find((m: { role: string }) => m.role === "user");
 
-    let listingsData: string = "";
-    let listingsForClient: unknown[] = [];
-
-    // Detect auto-trigger from wizard completion
     const isAutoTrigger =
       lastUserMessage?.content?.includes("Mostrami subito i migliori annunci");
 
+    interface ClientListing {
+      id: string;
+      title: string;
+      price: number;
+      price_period: string | null;
+      address: string;
+      city: string;
+      surface_sqm: number;
+      rooms: number;
+      floor: number | null;
+      property_type: string;
+      has_garden: boolean;
+      has_parking: boolean;
+      has_elevator: boolean;
+      has_terrace: boolean;
+      match_score: number;
+    }
+
+    let listingsForClient: ClientListing[] = [];
+    let listingsSummaryForClaude = "";
+
     if (lastUserMessage) {
-      // More results + looser filters for wizard auto-trigger
       const searchLimit = isAutoTrigger ? 8 : 5;
       const adjustedFilters = { ...searchFilters };
       if (isAutoTrigger) {
-        // Widen budget ±20%
         if (adjustedFilters.price_max) {
           adjustedFilters.price_max = Math.round(adjustedFilters.price_max * 1.2);
         }
         if (adjustedFilters.price_min) {
           adjustedFilters.price_min = Math.round(adjustedFilters.price_min * 0.8);
         }
-        // Widen radius +5km
         if (adjustedFilters.max_distance_km) {
           adjustedFilters.max_distance_km += 5;
         }
@@ -133,6 +165,7 @@ export async function POST(request: NextRequest) {
         );
 
         if (results.length > 0) {
+          // Data for the SSE listings event (goes to client cards)
           listingsForClient = results.map((r) => ({
             id: r.id,
             title: r.title,
@@ -143,35 +176,28 @@ export async function POST(request: NextRequest) {
             surface_sqm: r.surface_sqm,
             rooms: r.rooms,
             floor: r.floor,
-            photos: r.photos,
-            type: r.type,
             property_type: r.property_type,
+            has_garden: r.has_garden,
             has_parking: r.has_parking,
             has_elevator: r.has_elevator,
-            has_garden: r.has_garden,
             has_terrace: r.has_terrace,
-            ai_reason: null,   // will be enriched by AI via LISTING_SCORES
-            match_score: Math.floor(Math.random() * 15) + 82,  // initial 82-97, refined by AI
+            match_score: Math.floor(Math.random() * 16) + 82,
           }));
 
-          listingsData = `\n\n[RISULTATI RICERCA - mostra questi all'utente]\n${results
+          // Plain text summary for Claude (NO JSON, NO hidden blocks)
+          listingsSummaryForClaude = `\n\nHo trovato ${results.length} immobili. Ecco un riepilogo:\n${results
             .map(
               (r, i) =>
-                `${i + 1}. [ID:${r.id}] "${r.title}" - €${r.price.toLocaleString("it-IT")}${r.price_period === "month" ? "/mese" : ""} - ${r.address}, ${r.city} - ${r.surface_sqm}m² - ${r.rooms} locali - Piano ${r.floor ?? "N/D"} - ${r.property_type}${r.has_parking ? " - Posto auto" : ""}${r.has_garden ? " - Giardino" : ""}${r.has_elevator ? " - Ascensore" : ""}${r.has_terrace ? " - Terrazzo" : ""}`
+                `${i + 1}. "${r.title}" - €${r.price.toLocaleString("it-IT")}${r.price_period === "month" ? "/mese" : ""} - ${r.address}, ${r.city} - ${r.surface_sqm}m² - ${r.rooms} locali${r.floor ? ` - Piano ${r.floor}` : ""} - ${r.property_type}${r.has_parking ? " - Posto auto" : ""}${r.has_garden ? " - Giardino" : ""}${r.has_elevator ? " - Ascensore" : ""}${r.has_terrace ? " - Terrazzo" : ""}`
             )
-            .join("\n")}
-
-ISTRUZIONI IMPORTANTI: Nella tua risposta testuale, per ogni annuncio che menzioni devi includere un blocco JSON nascosto alla fine del messaggio in questo formato esatto:
-<!--LISTING_SCORES:${JSON.stringify(results.map(r => ({ id: r.id })))}-->
-Il blocco deve contenere per ogni listing: "id", "match_score" (numero 0-100 basato su quanto l'annuncio corrisponde alle preferenze dell'utente), "ai_reason" (UNA frase breve, max 15 parole, che spiega perché è adatto a questo utente specifico).
-Esempio: <!--LISTING_SCORES:[{"id":"abc","match_score":92,"ai_reason":"Vicino al centro con giardino e posto auto"}]-->`;
+            .join("\n")}\n\nPresenta questi risultati all'utente in modo discorsivo, spiegando perché ciascuno è compatibile con le sue esigenze. Le card visive sono già mostrate all'utente, quindi non ripetere i dati tecnici — concentrati sul perché.`;
         }
       } catch {
         // Search failed — continue without listings
       }
     }
 
-    // Build messages for Claude
+    // ─── STEP 3: Build Claude messages (plain text only) ───
     const claudeMessages = messages.map(
       (m: { role: string; content: string }) => ({
         role: m.role as "user" | "assistant",
@@ -179,20 +205,20 @@ Esempio: <!--LISTING_SCORES:[{"id":"abc","match_score":92,"ai_reason":"Vicino al
       })
     );
 
-    // Append listings context to the last user message
-    if (listingsData && claudeMessages.length > 0) {
+    // Append plain text listings summary to last user message
+    if (listingsSummaryForClaude && claudeMessages.length > 0) {
       const last = claudeMessages[claudeMessages.length - 1];
       if (last.role === "user") {
-        last.content += listingsData;
+        last.content += listingsSummaryForClaude;
       }
     }
 
-    // For wizard auto-trigger, prepend instruction to start with results
+    // For wizard auto-trigger
     if (isAutoTrigger) {
-      systemPrompt += `\n\nL'utente ha appena completato il wizard di configurazione. Inizia SUBITO con "Ecco le migliori proposte che ho trovato per te:" e presenta i risultati senza fare domande aggiuntive. Se non ci sono risultati, suggerisci di ampliare la ricerca.`;
+      systemPrompt += `\n\nL'utente ha appena completato il wizard di configurazione. Presenta subito i risultati trovati in modo discorsivo. Se non ci sono risultati, suggerisci di ampliare la ricerca.`;
     }
 
-    // Create a combined stream that sends listings + Claude response
+    // ─── STEP 4: Create combined SSE stream ───
     let claudeStream: ReadableStream<Uint8Array>;
     try {
       claudeStream = streamChat({
@@ -206,37 +232,43 @@ Esempio: <!--LISTING_SCORES:[{"id":"abc","match_score":92,"ai_reason":"Vicino al
 
     const combinedStream = new ReadableStream({
       async start(controller) {
-        // Send listings event first if we have results
-        if (listingsForClient.length > 0) {
-          const listingsEvent = JSON.stringify({
-            type: "listings",
-            data: listingsForClient,
-          });
-          controller.enqueue(
-            encoder.encode(`data: ${listingsEvent}\n\n`)
-          );
-        }
-
-        // Pipe Claude's stream
-        const reader = claudeStream.getReader();
         try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            controller.enqueue(value);
+          // FIRST: send listings event immediately (before any Claude text)
+          if (listingsForClient.length > 0) {
+            controller.enqueue(
+              sseEncode({ type: "listings", data: listingsForClient })
+            );
           }
-        } catch (streamErr) {
-          console.error("[chat/route] Errore durante streaming Claude:", streamErr);
-          const errorEvent = JSON.stringify({
-            type: "error",
-            content: "Si è verificato un errore durante la generazione della risposta.",
-          });
-          controller.enqueue(encoder.encode(`data: ${errorEvent}\n\n`));
+
+          // THEN: pipe Claude's streaming text
+          const reader = claudeStream.getReader();
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              controller.enqueue(value);
+            }
+          } catch (streamErr) {
+            console.error("[chat/route] Stream error:", streamErr);
+            controller.enqueue(
+              sseEncode({
+                type: "error",
+                content: "Errore durante la generazione della risposta.",
+              })
+            );
+          } finally {
+            reader.releaseLock();
+          }
+
+          // LAST: always send done
+          controller.enqueue(sseEncode({ type: "done" }));
+        } catch (err) {
+          console.error("[chat/route] Combined stream error:", err);
+          controller.enqueue(
+            sseEncode({ type: "error", content: "Errore interno." })
+          );
+          controller.enqueue(sseEncode({ type: "done" }));
         } finally {
-          // Always send "done" event
-          const doneEvent = JSON.stringify({ type: "done" });
-          controller.enqueue(encoder.encode(`data: ${doneEvent}\n\n`));
-          reader.releaseLock();
           controller.close();
         }
       },

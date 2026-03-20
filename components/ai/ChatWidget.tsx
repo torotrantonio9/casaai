@@ -142,10 +142,7 @@ export function ChatWidget({
                 ]);
               } else if (event.type === "text" && event.content) {
                 fullText += event.content;
-                const displayText = fullText
-                  .replace(/<!--FILTERS:[\s\S]*?-->/, "")
-                  .replace(/<!--LISTING_SCORES:[\s\S]*?-->/, "");
-                setStreamingText(displayText);
+                setStreamingText(fullText);
               } else if (event.type === "error") {
                 setMessages((prev) => [
                   ...prev,
@@ -157,49 +154,10 @@ export function ChatWidget({
                 ]);
                 setStreamingText("");
               } else if (event.type === "done") {
-                // Extract AI scores for listings
-                const scoresMatch = fullText.match(
-                  /<!--LISTING_SCORES:([\s\S]*?)-->/
-                );
-                if (scoresMatch) {
-                  try {
-                    const scores = JSON.parse(scoresMatch[1]) as {
-                      id: string;
-                      match_score?: number;
-                      ai_reason?: string;
-                    }[];
-                    // Update the listings message with AI scores
-                    setMessages((prev) =>
-                      prev.map((m) => {
-                        if (m.type !== "listings" || !m.listings) return m;
-                        return {
-                          ...m,
-                          listings: m.listings.map((l) => {
-                            const s = scores.find((sc) => sc.id === l.id);
-                            if (s) {
-                              return {
-                                ...l,
-                                match_score: s.match_score ?? l.match_score,
-                                ai_reason: s.ai_reason ?? l.ai_reason,
-                              };
-                            }
-                            return l;
-                          }),
-                        };
-                      })
-                    );
-                  } catch {
-                    // ignore parse errors
-                  }
-                }
-
-                const displayText = fullText
-                  .replace(/<!--FILTERS:[\s\S]*?-->/, "")
-                  .replace(/<!--LISTING_SCORES:[\s\S]*?-->/, "");
-                if (displayText.trim()) {
+                if (fullText.trim()) {
                   setMessages((prev) => [
                     ...prev,
-                    makeTextMsg("assistant", displayText),
+                    makeTextMsg("assistant", fullText),
                   ]);
                 }
                 setStreamingText("");
@@ -212,13 +170,10 @@ export function ChatWidget({
 
         // Fallback: if stream ended without "done" event
         if (fullText && streamingText) {
-          const displayText = fullText
-            .replace(/<!--FILTERS:[\s\S]*?-->/, "")
-            .replace(/<!--LISTING_SCORES:[\s\S]*?-->/, "");
-          if (displayText.trim()) {
+          if (fullText.trim()) {
             setMessages((prev) => [
               ...prev,
-              makeTextMsg("assistant", displayText),
+              makeTextMsg("assistant", fullText),
             ]);
             setStreamingText("");
           }
