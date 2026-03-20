@@ -60,7 +60,15 @@ export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
   const ip = getClientIP(request);
 
-  // Rate limit: /api/chat — 20 requests/hour per IP (skip whitelisted)
+  // Block /api/seed in production
+  if (pathname === "/api/seed" && process.env.NODE_ENV === "production") {
+    return NextResponse.json(
+      { error: "Seed disabilitato in produzione" },
+      { status: 403 }
+    );
+  }
+
+  // Rate limit: /api/chat — 30 requests/hour per IP (skip whitelisted)
   if (
     pathname === "/api/chat" &&
     request.method === "POST" &&
@@ -68,15 +76,19 @@ export async function proxy(request: NextRequest) {
   ) {
     const { allowed, remaining } = checkRateLimit(
       `chat:${ip}`,
-      20,
+      30,
       60 * 60 * 1000
     );
     if (!allowed) {
+      const retryAfter = 3600;
       return NextResponse.json(
         { error: "Troppe richieste. Riprova tra un'ora." },
         {
           status: 429,
-          headers: { "X-RateLimit-Remaining": "0" },
+          headers: {
+            "X-RateLimit-Remaining": "0",
+            "Retry-After": String(retryAfter),
+          },
         }
       );
     }
@@ -91,7 +103,7 @@ export async function proxy(request: NextRequest) {
     const hasAuth = request.cookies
       .getAll()
       .some((c) => c.name.startsWith("sb-"));
-    const maxReqs = hasAuth ? 20 : 5;
+    const maxReqs = hasAuth ? 10 : 3;
 
     const { allowed } = checkRateLimit(`valuation:${ip}`, maxReqs, dayMs);
     if (!allowed) {
@@ -165,5 +177,6 @@ export const config = {
     "/registrati",
     "/api/chat",
     "/api/ai/valuation",
+    "/api/seed",
   ],
 };

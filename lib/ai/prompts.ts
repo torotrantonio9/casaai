@@ -183,3 +183,13 @@ FORMATO RISPOSTA (JSON):
   "reason": "string (max 100 caratteri)",
   "priority": "high" | "medium" | "low"
 }`;
+
+export const PRICE_PER_SQM_2026: Record<string, { min: number; max: number; avg: number }> = {
+  'Napoli': { min: 1800, max: 4500, avg: 2800 },
+  'Caserta': { min: 900, max: 1800, avg: 1200 },
+  'Salerno': { min: 1200, max: 2500, avg: 1700 },
+  'Avellino': { min: 700, max: 1400, avg: 950 },
+  'Benevento': { min: 600, max: 1200, avg: 850 },
+  'Roma': { min: 2500, max: 8000, avg: 4200 },
+  'Milano': { min: 3000, max: 10000, avg: 5500 },
+};

@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { motion } from "framer-motion";
 
@@ -42,9 +41,20 @@ interface Props {
 /* ───────── helpers ───────── */
 
 function matchBadgeColor(score: number): string {
-  if (score > 90) return "#2d6a4f";
-  if (score > 80) return "#e07b39";
-  return "#9e6b4a";
+  if (score >= 90) return "#16a34a";
+  if (score >= 75) return "#ea580c";
+  if (score >= 60) return "#dc2626";
+  return "#6b7280";
+}
+
+function cardBgColor(propertyType?: string): string {
+  switch (propertyType) {
+    case "apartment": return "#eff6ff";
+    case "villa": return "#ecfdf5";
+    case "house": return "#fef3c7";
+    case "commercial": return "#f3e8ff";
+    default: return "#f5f0eb";
+  }
 }
 
 function listingEmoji(listing: ListingCard): string {
@@ -56,23 +66,23 @@ function listingEmoji(listing: ListingCard): string {
 /* ───────── Single listing card ───────── */
 
 function ResultCard({ listing }: { listing: ListingCard }) {
-  const router = useRouter();
-  const [shadow, setShadow] = useState("none");
+  const [hovered, setHovered] = useState(false);
   const score = listing.match_score;
 
   return (
     <div
-      onClick={() => router.push(`/annunci/${listing.id}`)}
-      onMouseEnter={() => setShadow("0 4px 20px rgba(0,0,0,0.1)")}
-      onMouseLeave={() => setShadow("none")}
+      onClick={() => window.open(`/annunci/${listing.id}`, '_blank')}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       style={{
         border: "1px solid #e5e7eb",
         borderRadius: 16,
         overflow: "hidden",
         cursor: "pointer",
         background: "white",
-        transition: "box-shadow 0.2s",
-        boxShadow: shadow,
+        transform: hovered ? "translateY(-2px)" : "none",
+        boxShadow: hovered ? "0 8px 25px rgba(0,0,0,0.12)" : "0 1px 3px rgba(0,0,0,0.05)",
+        transition: "transform 0.2s, box-shadow 0.2s",
       }}
     >
       {/* Image area + match badge */}
@@ -80,7 +90,7 @@ function ResultCard({ listing }: { listing: ListingCard }) {
         style={{
           position: "relative",
           height: 140,
-          background: "#f5f0eb",
+          background: cardBgColor(listing.property_type),
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -113,7 +123,7 @@ function ResultCard({ listing }: { listing: ListingCard }) {
           style={{
             fontSize: 22,
             fontWeight: 700,
-            color: "#111827",
+            color: "#1e40af",
             marginBottom: 8,
           }}
         >
@@ -143,7 +153,7 @@ function ResultCard({ listing }: { listing: ListingCard }) {
             gap: 12,
             fontSize: 12,
             color: "#6b7280",
-            marginBottom: 12,
+            marginBottom: 8,
           }}
         >
           <span>⇄ {listing.rooms} locali</span>
@@ -151,21 +161,28 @@ function ResultCard({ listing }: { listing: ListingCard }) {
           {listing.floor != null && listing.floor > 0 && <span>▤ {listing.floor}° piano</span>}
         </div>
 
+        {/* Feature tags */}
+        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 8 }}>
+          {listing.has_elevator && <span style={{ background: "#f1f5f9", color: "#475569", borderRadius: 12, padding: "2px 8px", fontSize: 10 }}>Ascensore</span>}
+          {listing.has_parking && <span style={{ background: "#f1f5f9", color: "#475569", borderRadius: 12, padding: "2px 8px", fontSize: 10 }}>P. Auto</span>}
+          {listing.has_garden && <span style={{ background: "#f1f5f9", color: "#475569", borderRadius: 12, padding: "2px 8px", fontSize: 10 }}>Giardino</span>}
+          {listing.has_terrace && <span style={{ background: "#f1f5f9", color: "#475569", borderRadius: 12, padding: "2px 8px", fontSize: 10 }}>Terrazzo</span>}
+        </div>
+
         {/* AI reason */}
         <div
           style={{
             fontSize: 12,
-            borderTop: "1px solid #f3f4f6",
-            paddingTop: 10,
+            borderLeft: "3px solid #3b82f6",
+            paddingLeft: 10,
+            paddingTop: 6,
+            paddingBottom: 6,
+            marginTop: 8,
+            fontStyle: "italic",
+            color: "#4b5563",
           }}
         >
-          <span style={{ color: "#e07b39", fontWeight: 600 }}>
-            ✦ Perché ti consiglio questo:{" "}
-          </span>
-          <span style={{ color: "#374151" }}>
-            {listing.ai_reason ||
-              "Ottima compatibilità con le tue preferenze"}
-          </span>
+          {listing.ai_reason || `${listing.rooms} locali, ${listing.surface_sqm}m² a ${listing.city}.`}
         </div>
       </div>
     </div>

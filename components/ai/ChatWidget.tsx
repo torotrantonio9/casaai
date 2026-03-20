@@ -62,6 +62,8 @@ export function ChatWidget({
     inputPlaceholder ?? "Descrivi la casa dei tuoi sogni..."
   );
   const [shownListingIds, setShownListingIds] = useState<string[]>([]);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [searchStatus, setSearchStatus] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const autoSentRef = useRef(false);
@@ -84,6 +86,7 @@ export function ChatWidget({
     ) => {
       setIsStreaming(true);
       setStreamingText("");
+      setSearchStatus("Ricerca in corso...");
 
       abortRef.current = new AbortController();
       const timeoutId = setTimeout(() => abortRef.current?.abort(), 45000);
@@ -148,9 +151,12 @@ export function ChatWidget({
                   ...prev,
                   makeListingsMsg(event.data),
                 ]);
+                setSearchStatus(`Trovati ${event.data.length} risultati`);
               } else if (event.type === "text" && event.content) {
                 fullText += event.content;
                 setStreamingText(fullText);
+              } else if (event.type === "suggestions" && Array.isArray(event.data)) {
+                setSuggestions(event.data);
               } else if (event.type === "error") {
                 setMessages((prev) => [
                   ...prev,
@@ -210,6 +216,7 @@ export function ChatWidget({
       } finally {
         clearTimeout(timeoutId);
         setIsStreaming(false);
+        setSearchStatus(null);
         abortRef.current = null;
         options?.onDone?.();
       }
@@ -244,19 +251,64 @@ export function ChatWidget({
     const newMessages = [...messages, userMessage];
     setMessages(newMessages);
     setInput("");
+    setSuggestions([]);
 
     await streamChatMessage(newMessages);
   }
 
   return (
-    <div className="flex h-full flex-col rounded-xl border border-gray-200 bg-white shadow-sm">
-      {/* Header */}
-      <div className="flex items-center gap-2 border-b border-gray-100 px-4 py-3">
-        <div className="h-2.5 w-2.5 rounded-full bg-green-500" />
-        <h3 className="text-sm font-semibold" style={{ color: "#111827" }}>
-          Assistente CasaAI
-        </h3>
+    <div className="flex h-full flex-col border border-gray-200 bg-white shadow-sm" style={{ borderRadius: "0 0 16px 16px", overflow: "hidden" }}>
+      {/* Spin keyframe for search spinner */}
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+
+      {/* Gradient Header */}
+      <div style={{
+        background: "linear-gradient(135deg, #1e40af 0%, #3b82f6 100%)",
+        padding: "16px 20px",
+        borderRadius: "16px 16px 0 0"
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{
+            width: 36, height: 36,
+            background: "rgba(255,255,255,0.2)",
+            borderRadius: "50%",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 18
+          }}>🏠</div>
+          <div>
+            <div style={{ color: "white", fontWeight: 600, fontSize: 14 }}>
+              Assistente CasaAI
+            </div>
+            <div style={{ color: "rgba(255,255,255,0.8)", fontSize: 11, display: "flex", alignItems: "center", gap: 4 }}>
+              <span style={{ width: 6, height: 6, background: "#4ade80", borderRadius: "50%", display: "inline-block" }} />
+              Online · risponde in pochi secondi
+            </div>
+          </div>
+        </div>
       </div>
+
+      {/* Search progress bar */}
+      {searchStatus && (
+        <div style={{
+          padding: "8px 16px",
+          background: "#eff6ff",
+          borderBottom: "1px solid #dbeafe",
+          fontSize: 12,
+          color: "#1e40af",
+          display: "flex",
+          alignItems: "center",
+          gap: 8
+        }}>
+          <div style={{
+            width: 12, height: 12,
+            border: "2px solid #93c5fd",
+            borderTopColor: "#1e40af",
+            borderRadius: "50%",
+            animation: "spin 0.8s linear infinite"
+          }} />
+          {searchStatus}
+        </div>
+      )}
 
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto">
@@ -266,6 +318,41 @@ export function ChatWidget({
           streamingText={streamingText}
         />
       </div>
+
+      {/* Quick reply suggestions */}
+      {suggestions.length > 0 && !isStreaming && (
+        <div style={{ display: "flex", gap: 8, padding: "8px 16px", flexWrap: "wrap" }}>
+          {suggestions.map((s, i) => (
+            <button
+              key={i}
+              onClick={() => {
+                setSuggestions([]);
+                setInput(s);
+                // Auto-submit
+                const userMessage = makeTextMsg("user", s);
+                const newMessages = [...messages, userMessage];
+                setMessages(newMessages);
+                streamChatMessage(newMessages);
+              }}
+              style={{
+                background: "#eff6ff",
+                border: "1px solid #bfdbfe",
+                borderRadius: 20,
+                padding: "6px 14px",
+                fontSize: 12,
+                fontWeight: 500,
+                color: "#1e40af",
+                cursor: "pointer",
+                transition: "all 0.2s"
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "#dbeafe"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "#eff6ff"; }}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Input */}
       <form

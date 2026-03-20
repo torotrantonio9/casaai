@@ -24,7 +24,48 @@ Quando presenti risultati di ricerca:
 2. Per ogni risultato, una breve descrizione (2-3 righe) del perché è compatibile
 3. Invito a raffinare o contattare l'agenzia`;
 
-/* ─── Intent detection helpers ─── */
+/* ─── Conversation State ─── */
+
+interface ConversationState {
+  filters: {
+    city?: string;
+    max_price?: number;
+    min_price?: number;
+    rooms_min?: number;
+    has_elevator?: boolean;
+    has_parking?: boolean;
+    has_garden?: boolean;
+    has_terrace?: boolean;
+    type?: string; // sale or rent
+    property_type?: string;
+  };
+  shown_listing_ids: string[];
+  search_count: number;
+  user_profile: {
+    who?: string;
+    rooms_needed?: number;
+    priorities?: string[];
+  };
+}
+
+function emptyConversationState(): ConversationState {
+  return {
+    filters: {},
+    shown_listing_ids: [],
+    search_count: 0,
+    user_profile: {},
+  };
+}
+
+/* ─── Intent detection ─── */
+
+type ChatIntent =
+  | "new_search"
+  | "refine"
+  | "show_cards"
+  | "question"
+  | "contact"
+  | "compare";
 
 const WANTS_NEW_LISTINGS_RE =
   /\b(mostra|cerca|trova|vedi|altri|nuov[ie]|divers[ie]|alternativ[ie]|cambia|aggiorna|ricerc[ao]|proposte|annunci|risultati|opzioni|fammi vedere|visualizza|guarda)\b/i;
@@ -35,16 +76,98 @@ const IS_QUESTION_RE =
 const REFS_SHOWN_RE =
   /\b(quest[ie]|ultime?|sopra|precedenti?|già mostrat[ie]|quell[ie])\b/i;
 
+function detectIntent(
+  userText: string,
+  hasShownListings: boolean
+): ChatIntent {
+  // 'show_cards' if user references shown listings
+  if (
+    /\b(mostrami|fammi vedere|visualizza)\b/i.test(userText) &&
+    /\b(quest[ie]|ultime?|sopra|precedenti?)\b/i.test(userText) &&
+    hasShownListings
+  )
+    return "show_cards";
+  // 'contact' if user wants to contact agency
+  if (
+    /\b(contatt|chiam|telefon|visit[ao]|appuntamento|agenzia)\b/i.test(
+      userText
+    )
+  )
+    return "contact";
+  // 'compare' if user wants to compare
+  if (
+    /\b(confronta|paragona|differenz|meglio tra|versus|vs)\b/i.test(userText)
+  )
+    return "compare";
+  // 'refine' if user adds constraints to existing search
+  if (
+    hasShownListings &&
+    /\b(solo|filtra|con|senza|ascensore|parcheggio|giardino|terrazzo|piano|locali|budget|prezzo|meno|più)\b/i.test(
+      userText
+    )
+  )
+    return "refine";
+  // 'question' if asking about shown listings
+  if (
+    /\b(qual[eè]|com'è|quanto|dove|perch[eé]|dimmi|spieg|confronta)\b/i.test(
+      userText
+    )
+  )
+    return "question";
+  // Default: new search
+  return "new_search";
+}
+
+// Keep legacy function for backward compat within the file
+function detectMessageIntent(text: string): {
+  wantsNewListings: boolean;
+  isQuestion: boolean;
+} {
+  return {
+    wantsNewListings: WANTS_NEW_LISTINGS_RE.test(text),
+    isQuestion: IS_QUESTION_RE.test(text),
+  };
+}
+
 /* ─── City extraction ─── */
 
 const KNOWN_CITIES = [
-  "napoli", "salerno", "caserta", "avellino", "benevento",
-  "pozzuoli", "roma", "milano", "torino", "firenze", "bologna",
-  "bari", "palermo", "catania", "genova", "venezia", "verona",
-  "padova", "brescia", "modena", "parma", "reggio calabria",
-  "perugia", "cagliari", "trieste", "livorno", "taranto",
-  "foggia", "lecce", "latina", "giugliano", "marano",
-  "torre del greco", "portici", "ercolano", "castellammare",
+  "napoli",
+  "salerno",
+  "caserta",
+  "avellino",
+  "benevento",
+  "pozzuoli",
+  "roma",
+  "milano",
+  "torino",
+  "firenze",
+  "bologna",
+  "bari",
+  "palermo",
+  "catania",
+  "genova",
+  "venezia",
+  "verona",
+  "padova",
+  "brescia",
+  "modena",
+  "parma",
+  "reggio calabria",
+  "perugia",
+  "cagliari",
+  "trieste",
+  "livorno",
+  "taranto",
+  "foggia",
+  "lecce",
+  "latina",
+  "giugliano",
+  "marano",
+  "torre del greco",
+  "portici",
+  "ercolano",
+  "castellammare",
 ];
 
 function extractCity(text: string): string | null {
@@ -82,6 +205,35 @@ function extractRooms(text: string): number | null {
   const match = lower.match(/\b(\d)\s*(?:locali|stanze|vani|camere)\b/);
   if (match) return parseInt(match[1], 10);
   return null;
+}
+
+/* ─── Price extraction from user text ─── */
+
+function extractPrice(text: string): { min?: number; max?: number } {
+  const lower = text.toLowerCase();
+  const result: { min?: number; max?: number } = {};
+
+  // "meno di 200k", "sotto 200000", "massimo 200k"
+  const maxMatch = lower.match(
+    /\b(?:meno di|sotto|massimo|max|fino a|entro)\s*(?:€\s*)?(\d+)\s*(?:k|mila|\.000)?\b/
+  );
+  if (maxMatch) {
+    let val = parseInt(maxMatch[1], 10);
+    if (val < 10000 && /k|mila/i.test(maxMatch[0])) val *= 1000;
+    result.max = val;
+  }
+
+  // "più di 100k", "almeno 100000", "minimo 100k"
+  const minMatch = lower.match(
+    /\b(?:più di|sopra|almeno|minimo|min|da)\s*(?:€\s*)?(\d+)\s*(?:k|mila|\.000)?\b/
+  );
+  if (minMatch) {
+    let val = parseInt(minMatch[1], 10);
+    if (val < 10000 && /k|mila/i.test(minMatch[0])) val *= 1000;
+    result.min = val;
+  }
+
+  return result;
 }
 
 /* ─── Match score calculation ─── */
@@ -178,15 +330,149 @@ function generateAiReason(listing: DbListing, filters: FilterSet): string {
   return `${listing.rooms} locali, ${listing.surface_sqm}m² a ${listing.city}.`;
 }
 
-function detectMessageIntent(text: string): {
-  wantsNewListings: boolean;
-  isQuestion: boolean;
-} {
+/* ─── Filter merging: accumulate new filters into existing state ─── */
+
+function mergeFiltersFromMessage(
+  state: ConversationState,
+  userText: string,
+  contextBudgetMax: number | null,
+  contextIntent: string | null,
+  contextRooms: number | null,
+  contextWho: string | null
+): ConversationState {
+  const newState = structuredClone(state);
+
+  // City: override if user explicitly mentions a new city
+  const cityFromUser = extractCity(userText);
+  if (cityFromUser) {
+    newState.filters.city = cityFromUser;
+  }
+
+  // Features: accumulate (once set, stay set unless user says "senza")
+  const features = extractFeatureFilters(userText);
+  if (features.wantsElevator) newState.filters.has_elevator = true;
+  if (features.wantsParking) newState.filters.has_parking = true;
+  if (features.wantsGarden) newState.filters.has_garden = true;
+  if (features.wantsTerrace) newState.filters.has_terrace = true;
+
+  // Handle "senza" (removal of features)
+  const lower = userText.toLowerCase();
+  if (/\bsenza\s+ascensore\b/i.test(lower))
+    newState.filters.has_elevator = false;
+  if (/\bsenza\s+(?:parcheggio|posto auto|garage)\b/i.test(lower))
+    newState.filters.has_parking = false;
+  if (/\bsenza\s+giardino\b/i.test(lower))
+    newState.filters.has_garden = false;
+  if (/\bsenza\s+terrazzo\b/i.test(lower))
+    newState.filters.has_terrace = false;
+
+  // Rooms: override if user explicitly mentions
+  const roomsFromUser = extractRooms(userText);
+  if (roomsFromUser) {
+    newState.filters.rooms_min = roomsFromUser;
+  } else if (!newState.filters.rooms_min && contextRooms) {
+    newState.filters.rooms_min = contextRooms;
+  }
+
+  // Price: merge from user text or context
+  const priceFromUser = extractPrice(userText);
+  if (priceFromUser.max) newState.filters.max_price = priceFromUser.max;
+  if (priceFromUser.min) newState.filters.min_price = priceFromUser.min;
+  if (!newState.filters.max_price && contextBudgetMax) {
+    newState.filters.max_price = contextBudgetMax;
+  }
+
+  // Type from context
+  if (contextIntent && !newState.filters.type) {
+    newState.filters.type = contextIntent;
+  }
+
+  // User profile from context
+  if (contextWho && !newState.user_profile.who) {
+    newState.user_profile.who = contextWho;
+  }
+  if (contextRooms && !newState.user_profile.rooms_needed) {
+    newState.user_profile.rooms_needed = contextRooms;
+  }
+
+  return newState;
+}
+
+/* ─── Suggestions generation ─── */
+
+function generateSuggestions(
+  intent: ChatIntent,
+  state: ConversationState,
+  listingsCount: number
+): string[] {
+  if (intent === "new_search" || intent === "refine") {
+    if (listingsCount === 0) {
+      return ["Amplia il budget", "Prova un'altra zona", "Rimuovi filtri"];
+    }
+    // After search with results
+    const suggestions: string[] = [];
+    if (!state.filters.has_elevator) suggestions.push("Filtra con ascensore");
+    if (!state.filters.rooms_min) suggestions.push("Solo trilocali");
+    suggestions.push("Cambia zona");
+    return suggestions.slice(0, 3);
+  }
+
+  if (intent === "show_cards") {
+    return ["Mostrami altri annunci", "Cerca in altra zona", "Contatta l'agenzia"];
+  }
+
+  if (intent === "question") {
+    return [
+      "Mostrami altri annunci",
+      "Cerca in altra zona",
+      "Contatta l'agenzia",
+    ];
+  }
+
+  if (intent === "contact") {
+    return ["Torna alla ricerca", "Mostrami altri annunci"];
+  }
+
+  if (intent === "compare") {
+    return ["Vedi altri risultati", "Cambia budget", "Cerca zona diversa"];
+  }
+
+  // Default
+  return ["Cerca casa", "Mostrami annunci"];
+}
+
+/* ─── Personalized system prompt based on user profile ─── */
+
+function getProfilePromptAddition(who?: string): string {
+  switch (who) {
+    case "solo":
+      return "\n\nL'utente cerca per sé, enfatizza praticità e comodità.";
+    case "coppia":
+      return "\n\nL'utente cerca per la coppia, enfatizza spazi per due e zona romantica.";
+    case "famiglia":
+      return "\n\nL'utente cerca per la famiglia, enfatizza vicinanza scuole, parchi, sicurezza quartiere.";
+    case "investimento":
+      return "\n\nL'utente investe, enfatizza rendimento, potenziale di rivalutazione, facilità di affitto.";
+    default:
+      return "";
+  }
+}
+
+/* ─── Build FilterSet from ConversationState for scoring ─── */
+
+function buildFilterSet(state: ConversationState): FilterSet {
   return {
-    wantsNewListings: WANTS_NEW_LISTINGS_RE.test(text),
-    isQuestion: IS_QUESTION_RE.test(text),
+    city: state.filters.city ?? null,
+    wantsElevator: state.filters.has_elevator ?? false,
+    wantsParking: state.filters.has_parking ?? false,
+    wantsGarden: state.filters.has_garden ?? false,
+    wantsTerrace: state.filters.has_terrace ?? false,
+    maxBudget: state.filters.max_price ?? 300000,
+    rooms: state.filters.rooms_min ?? null,
   };
 }
+
+/* ─── Main POST handler ─── */
 
 export async function POST(request: NextRequest) {
   const encoder = new TextEncoder();
@@ -219,15 +505,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // ─── 1. Load context ───
+    // ─── 1. Load context and conversation state ───
     let systemPrompt = SYSTEM_BASE;
     let contextIntent: string | null = null;
     let contextBudgetMax: number | null = null;
     let contextRooms: number | null = null;
+    let contextWho: string | null = null;
+    let conversationState: ConversationState = emptyConversationState();
+
+    const supabase = createAdminClient();
 
     if (session_id) {
       try {
-        const supabase = createAdminClient();
+        // Load chat context
         const { data: ctx } = await supabase
           .from("chat_contexts")
           .select("*")
@@ -238,6 +528,7 @@ export async function POST(request: NextRequest) {
           contextIntent = ctx.intent;
           contextBudgetMax = ctx.budget_max;
           contextRooms = ctx.rooms_needed ?? null;
+          contextWho = ctx.who_is_searching ?? null;
           const contextMessage = buildContextMessage({
             intent: ctx.intent,
             budget_min: ctx.budget_min,
@@ -254,32 +545,55 @@ export async function POST(request: NextRequest) {
           });
           systemPrompt = `${SYSTEM_BASE}\n\n${contextMessage}`;
         }
+
+        // Load existing conversation state from chat_sessions
+        const { data: session } = await supabase
+          .from("chat_sessions")
+          .select("extracted_filters")
+          .eq("session_id", session_id)
+          .single();
+
+        if (session?.extracted_filters) {
+          // Restore persisted state, ensuring all fields exist
+          const persisted = session.extracted_filters as Partial<ConversationState>;
+          conversationState = {
+            filters: { ...emptyConversationState().filters, ...persisted.filters },
+            shown_listing_ids: persisted.shown_listing_ids ?? [],
+            search_count: persisted.search_count ?? 0,
+            user_profile: { ...emptyConversationState().user_profile, ...persisted.user_profile },
+          };
+        }
       } catch (e) {
-        console.error("[chat/route] Context load error:", e);
+        console.error("[chat/route] Context/state load error:", e);
       }
     }
 
-    // ─── 2. Parse user text for filters ───
+    // ─── 2. Parse user text and merge filters into state ───
     const lastUserMsg = [...messages]
       .reverse()
       .find((m: { role: string }) => m.role === "user");
     const userText = lastUserMsg?.content?.toLowerCase() ?? "";
-    const allText = messages
-      .map((m: { content?: string }) => m.content || "")
-      .join(" ")
-      .toLowerCase();
 
     const isAutoTrigger =
       is_auto_trigger ||
       userText.includes("mostrami subito i migliori annunci");
 
     const hasShownListings =
-      Array.isArray(shown_listing_ids) && shown_listing_ids.length > 0;
-    const shownIds = (shown_listing_ids as string[]) || [];
+      (Array.isArray(shown_listing_ids) && shown_listing_ids.length > 0) ||
+      conversationState.shown_listing_ids.length > 0;
+    const shownIds = [
+      ...new Set([
+        ...(shown_listing_ids as string[]),
+        ...conversationState.shown_listing_ids,
+      ]),
+    ];
+
+    // Detect intent with new expanded detection
+    const intent = detectIntent(userText, hasShownListings);
+    // Also keep legacy detection for backward compat in shouldSendListings logic
+    const { wantsNewListings, isQuestion } = detectMessageIntent(userText);
 
     const isFirstSearch = isAutoTrigger || !hasShownListings;
-
-    const { wantsNewListings, isQuestion } = detectMessageIntent(userText);
 
     // BUG 3: Detect "mostrami queste 2 case" — user wants to re-see shown listings
     const wantsToSeeShown =
@@ -288,28 +602,35 @@ export async function POST(request: NextRequest) {
     const wantsReshow = wantsToSeeShown && refsShown && shownIds.length > 0;
 
     // Decide whether to send listings
-    const shouldSendListings = isFirstSearch || wantsNewListings || wantsReshow;
+    const shouldSendListings =
+      isFirstSearch ||
+      wantsNewListings ||
+      wantsReshow ||
+      intent === "refine";
 
-    // Extract filters from conversation text
-    const cityFromUser = extractCity(userText);
-    const cityFromAll = extractCity(allText);
-    const cityFilter = cityFromUser ?? cityFromAll ?? null;
+    // Merge filters from current message into conversation state
+    conversationState = mergeFiltersFromMessage(
+      conversationState,
+      userText,
+      contextBudgetMax,
+      contextIntent,
+      contextRooms,
+      contextWho
+    );
 
-    const featureFilters = extractFeatureFilters(allText);
-    const roomsFromUser = extractRooms(userText);
-    const roomsFilter = roomsFromUser ?? contextRooms ?? null;
+    // Build FilterSet from the accumulated state
+    const currentFilters = buildFilterSet(conversationState);
 
-    const maxBudget = contextBudgetMax ?? 300000;
-
-    const currentFilters: FilterSet = {
-      city: cityFilter,
-      ...featureFilters,
-      maxBudget,
-      rooms: roomsFilter,
-    };
+    // Add personalized prompt based on user profile
+    const profileAddition = getProfilePromptAddition(
+      conversationState.user_profile.who
+    );
+    if (profileAddition) {
+      systemPrompt += profileAddition;
+    }
 
     console.log(
-      `[chat/route] isFirstSearch=${isFirstSearch}, wantsNewListings=${wantsNewListings}, wantsReshow=${wantsReshow}, isQuestion=${isQuestion}, shouldSendListings=${shouldSendListings}, city=${cityFilter}, rooms=${roomsFilter}`
+      `[chat/route] intent=${intent}, isFirstSearch=${isFirstSearch}, wantsNewListings=${wantsNewListings}, wantsReshow=${wantsReshow}, isQuestion=${isQuestion}, shouldSendListings=${shouldSendListings}, city=${currentFilters.city}, rooms=${currentFilters.rooms}, searchCount=${conversationState.search_count}`
     );
 
     // ─── 3. Search listings (only if needed) ───
@@ -317,8 +638,6 @@ export async function POST(request: NextRequest) {
 
     if (shouldSendListings) {
       try {
-        const supabase = createAdminClient();
-
         // BUG 3: Re-show already-shown listings
         if (wantsReshow && !wantsNewListings) {
           // Parse how many the user wants (default to last 2)
@@ -335,46 +654,54 @@ export async function POST(request: NextRequest) {
 
           listings = (reshowData ?? []) as DbListing[];
         } else {
-          // Normal search with dynamic filters (BUG 1 fix)
+          // Normal search with dynamic filters from accumulated state
           let query = supabase
             .from("listings")
             .select(
               "id, title, price, price_period, address, city, surface_sqm, rooms, floor, property_type, has_garden, has_parking, has_elevator, has_terrace"
             )
             .eq("status", "active")
-            .lte("price", Math.round(maxBudget * 1.15))
+            .lte(
+              "price",
+              Math.round((currentFilters.maxBudget) * 1.15)
+            )
             .order("created_at", { ascending: false })
             .limit(6);
 
-          // Apply intent filter
-          if (contextIntent) {
+          // Apply intent/type filter
+          if (conversationState.filters.type) {
             query = query.eq(
               "type",
-              contextIntent === "sale" ? "sale" : "rent"
+              conversationState.filters.type === "sale" ? "sale" : "rent"
             );
           }
 
-          // Apply city filter from user text
-          if (cityFilter) {
-            query = query.ilike("city", `%${cityFilter}%`);
+          // Apply city filter from accumulated state
+          if (currentFilters.city) {
+            query = query.ilike("city", `%${currentFilters.city}%`);
           }
 
-          // Apply feature filters from user text
-          if (featureFilters.wantsElevator) {
+          // Apply feature filters from accumulated state
+          if (currentFilters.wantsElevator) {
             query = query.eq("has_elevator", true);
           }
-          if (featureFilters.wantsParking) {
+          if (currentFilters.wantsParking) {
             query = query.eq("has_parking", true);
           }
-          if (featureFilters.wantsGarden) {
+          if (currentFilters.wantsGarden) {
             query = query.eq("has_garden", true);
           }
-          if (featureFilters.wantsTerrace) {
+          if (currentFilters.wantsTerrace) {
             query = query.eq("has_terrace", true);
           }
 
+          // Apply min price filter if set
+          if (conversationState.filters.min_price) {
+            query = query.gte("price", conversationState.filters.min_price);
+          }
+
           // Exclude already-shown listings when asking for new ones
-          if (wantsNewListings && hasShownListings) {
+          if (wantsNewListings && shownIds.length > 0) {
             query = query.not(
               "id",
               "in",
@@ -402,13 +729,38 @@ export async function POST(request: NextRequest) {
       } catch (e) {
         console.error("[chat/route] Listings search error:", e);
       }
+
+      // Update conversation state with new shown listings and search count
+      if (listings.length > 0) {
+        const newShownIds = listings.map((l) => l.id);
+        conversationState.shown_listing_ids = [
+          ...new Set([...conversationState.shown_listing_ids, ...newShownIds]),
+        ];
+        conversationState.search_count += 1;
+      }
     }
 
     console.log(
       `[chat/route] Found ${listings.length} listings to send`
     );
 
-    // ─── 4. Build Claude messages ───
+    // ─── 4. Save conversation state to chat_sessions ───
+    if (session_id) {
+      try {
+        await supabase.from("chat_sessions").upsert(
+          {
+            session_id,
+            extracted_filters: conversationState as unknown as Record<string, unknown>,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "session_id" }
+        );
+      } catch (e) {
+        console.error("[chat/route] State save error:", e);
+      }
+    }
+
+    // ─── 5. Build Claude messages ───
     const claudeMessages = messages.map(
       (m: { role: string; content: string }) => ({
         role: m.role as "user" | "assistant",
@@ -432,13 +784,15 @@ export async function POST(request: NextRequest) {
     } else if (shouldSendListings && listings.length === 0) {
       // BUG 5: No results — tell Claude to explain and suggest alternatives
       const appliedFilters: string[] = [];
-      if (cityFilter) appliedFilters.push(`città: ${cityFilter}`);
-      if (featureFilters.wantsElevator) appliedFilters.push("ascensore");
-      if (featureFilters.wantsParking) appliedFilters.push("posto auto");
-      if (featureFilters.wantsGarden) appliedFilters.push("giardino");
-      if (featureFilters.wantsTerrace) appliedFilters.push("terrazzo");
-      if (roomsFilter) appliedFilters.push(`${roomsFilter} locali`);
-      appliedFilters.push(`budget max €${maxBudget.toLocaleString("it-IT")}`);
+      if (currentFilters.city) appliedFilters.push(`città: ${currentFilters.city}`);
+      if (currentFilters.wantsElevator) appliedFilters.push("ascensore");
+      if (currentFilters.wantsParking) appliedFilters.push("posto auto");
+      if (currentFilters.wantsGarden) appliedFilters.push("giardino");
+      if (currentFilters.wantsTerrace) appliedFilters.push("terrazzo");
+      if (currentFilters.rooms) appliedFilters.push(`${currentFilters.rooms} locali`);
+      appliedFilters.push(
+        `budget max €${currentFilters.maxBudget.toLocaleString("it-IT")}`
+      );
 
       const filterSummary = appliedFilters.join(", ");
 
@@ -460,7 +814,7 @@ export async function POST(request: NextRequest) {
         "\n\nL'utente ha appena completato il wizard. Presenta subito i risultati trovati. Se non ci sono risultati, suggerisci di ampliare la ricerca.";
     }
 
-    // ─── 5. Create SSE stream ───
+    // ─── 6. Create SSE stream ───
     const stream = new ReadableStream({
       async start(controller) {
         try {
@@ -517,7 +871,17 @@ export async function POST(request: NextRequest) {
             }
           }
 
-          // STEP C: done
+          // STEP C: send contextual suggestions
+          const suggestions = generateSuggestions(
+            intent,
+            conversationState,
+            listings.length
+          );
+          if (suggestions.length > 0) {
+            send(controller, { type: "suggestions", data: suggestions });
+          }
+
+          // STEP D: done
           send(controller, { type: "done" });
         } catch (error) {
           console.error("[chat/route] Stream error:", error);

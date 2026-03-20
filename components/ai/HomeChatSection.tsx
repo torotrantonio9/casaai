@@ -4,6 +4,7 @@ import { useState, useCallback } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { ChatOnboarding, type ChatContext } from "./ChatOnboarding";
 import { ChatWidget } from "./ChatWidget";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 const FEATURE_LABELS: Record<string, string> = {
   has_elevator: "ascensore",
@@ -127,14 +128,16 @@ export function HomeChatSection() {
               animate={{ opacity: 1, x: 0 }}
               className="mx-auto h-[550px] max-w-2xl"
             >
-              <ChatWidget
-                sessionId={sessionId}
-                contextId={contextId}
-                welcomeMessage={welcomeMessage}
-                autoMessage={autoMessage}
-                initialDisabled={!!autoMessage}
-                inputPlaceholder="Vuoi affinare la ricerca? Chiedi all'AI..."
-              />
+              <ErrorBoundary>
+                <ChatWidget
+                  sessionId={sessionId}
+                  contextId={contextId}
+                  welcomeMessage={welcomeMessage}
+                  autoMessage={autoMessage}
+                  initialDisabled={!!autoMessage}
+                  inputPlaceholder="Vuoi affinare la ricerca? Chiedi all'AI..."
+                />
+              </ErrorBoundary>
             </motion.div>
           )}
         </AnimatePresence>

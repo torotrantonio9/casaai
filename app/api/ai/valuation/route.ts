@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { chatJSON } from "@/lib/ai/claude";
-import { VALUATION_SYSTEM_PROMPT } from "@/lib/ai/prompts";
+import { VALUATION_SYSTEM_PROMPT, PRICE_PER_SQM_2026 } from "@/lib/ai/prompts";
 import { findComparables } from "@/lib/ai/search";
 
 interface ValuationRequest {
@@ -60,7 +60,6 @@ export async function POST(request: NextRequest) {
       });
     } catch (err) {
       console.error("[valuation] Errore ricerca comparabili:", err);
-      // Continue without comparables
     }
 
     // Build context for Claude
@@ -88,10 +87,29 @@ export async function POST(request: NextRequest) {
         )
         .join("\n")}`;
     } else {
-      comparablesText =
-        "Nessun annuncio comparabile trovato nel database. " +
-        "Effettua la valutazione basandoti sulle medie di mercato della zona " +
-        `di ${body.city} per immobili di tipo ${body.type}. Indica confidenza "low".`;
+      // Use hardcoded 2026 price data as fallback
+      const cityKey = Object.keys(PRICE_PER_SQM_2026).find(
+        (k) => k.toLowerCase() === body.city.toLowerCase()
+      );
+      const priceData = cityKey
+        ? PRICE_PER_SQM_2026[cityKey]
+        : null;
+
+      if (priceData) {
+        comparablesText =
+          `Nessun annuncio comparabile trovato nel database.\n` +
+          `Usa questi dati di mercato 2026 per ${body.city}:\n` +
+          `- Prezzo medio/m²: €${priceData.avg}\n` +
+          `- Range prezzo/m²: €${priceData.min} - €${priceData.max}\n` +
+          `- Stima indicativa: €${priceData.avg * body.surface_sqm} (media) ` +
+          `Range: €${priceData.min * body.surface_sqm} - €${priceData.max * body.surface_sqm}\n` +
+          `Indica confidenza "medium" basandoti su dati medi di mercato.`;
+      } else {
+        comparablesText =
+          "Nessun annuncio comparabile trovato e nessun dato di mercato disponibile per questa zona. " +
+          "Effettua una stima conservativa basandoti su medie italiane generali. " +
+          `Indica confidenza "low".`;
+      }
     }
 
     const userMessage = `Valuta questo immobile:\n\n${propertyDetails}\n\n${comparablesText}`;
