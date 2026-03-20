@@ -1,12 +1,10 @@
 import { NextRequest } from "next/server";
+import Anthropic from "@anthropic-ai/sdk";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { streamChat } from "@/lib/ai/claude";
 import { buildContextMessage } from "@/lib/ai/prompts";
-import { semanticSearch, type SearchFilters } from "@/lib/ai/search";
 
 export const runtime = "nodejs";
 
-/* ─── Clean system prompt: NO hidden JSON instructions ─── */
 const SYSTEM_BASE = `IMPORTANTE: Rispondi SEMPRE in italiano. Non usare mai parole inglesi.
 
 Sei l'assistente AI di CasaAI, il marketplace immobiliare italiano più avanzato.
@@ -29,41 +27,21 @@ Quando presenti risultati di ricerca:
 export async function POST(request: NextRequest) {
   const encoder = new TextEncoder();
 
-  // Helper: send one SSE event
-  function sseEncode(obj: object): Uint8Array {
-    return encoder.encode(`data: ${JSON.stringify(obj)}\n\n`);
-  }
-
-  // Helper: SSE error response that always sends "done"
-  function sseError(message: string) {
-    const stream = new ReadableStream({
-      start(controller) {
-        controller.enqueue(sseEncode({ type: "error", content: message }));
-        controller.enqueue(sseEncode({ type: "done" }));
-        controller.close();
-      },
-    });
-    return new Response(stream, {
-      headers: {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-        Connection: "keep-alive",
-      },
-    });
-  }
+  const send = (controller: ReadableStreamDefaultController, obj: object) => {
+    controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
+  };
 
   try {
-    // Validate API key upfront
     if (!process.env.ANTHROPIC_API_KEY) {
       console.error("[chat/route] ANTHROPIC_API_KEY mancante");
       return new Response(
-        JSON.stringify({ error: "Configurazione AI mancante. Contatta l'amministratore." }),
+        JSON.stringify({ error: "Configurazione AI mancante." }),
         { status: 500, headers: { "Content-Type": "application/json" } }
       );
     }
 
     const body = await request.json();
-    const { messages, session_id, context_id } = body;
+    const { messages, session_id } = body;
 
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
       return new Response(
@@ -72,56 +50,55 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // ─── STEP 1: Build system prompt from context ───
+    // ─── 1. Load context ───
     let systemPrompt = SYSTEM_BASE;
-    let searchFilters: SearchFilters = {};
+    let contextIntent: string | null = null;
+    let contextBudgetMax: number | null = null;
 
     if (session_id) {
-      const supabase = createAdminClient();
-      const { data: ctx } = await supabase
-        .from("chat_contexts")
-        .select("*")
-        .eq("session_id", session_id)
-        .single();
+      try {
+        const supabase = createAdminClient();
+        const { data: ctx } = await supabase
+          .from("chat_contexts")
+          .select("*")
+          .eq("session_id", session_id)
+          .single();
 
-      if (ctx) {
-        const contextMessage = buildContextMessage({
-          intent: ctx.intent,
-          budget_min: ctx.budget_min,
-          budget_max: ctx.budget_max,
-          location_label: ctx.location_label,
-          location_lat: ctx.location_lat,
-          location_lng: ctx.location_lng,
-          max_distance_km: ctx.max_distance_km,
-          must_have: ctx.must_have ?? [],
-          nice_to_have: ctx.nice_to_have ?? [],
-          who_is_searching: ctx.who_is_searching ?? undefined,
-          rooms_needed: ctx.rooms_needed ?? undefined,
-          smart_working: ctx.smart_working ?? false,
-        });
-        systemPrompt = `${SYSTEM_BASE}\n\n${contextMessage}`;
-
-        searchFilters = {
-          type: ctx.intent === "sale" ? "sale" : "rent",
-          price_max: ctx.budget_max,
-          price_min: ctx.budget_min ?? undefined,
-          lat: ctx.location_lat ?? undefined,
-          lng: ctx.location_lng ?? undefined,
-          max_distance_km: ctx.max_distance_km ?? undefined,
-          features: ctx.must_have ?? [],
-        };
+        if (ctx) {
+          contextIntent = ctx.intent;
+          contextBudgetMax = ctx.budget_max;
+          const contextMessage = buildContextMessage({
+            intent: ctx.intent,
+            budget_min: ctx.budget_min,
+            budget_max: ctx.budget_max,
+            location_label: ctx.location_label,
+            location_lat: ctx.location_lat,
+            location_lng: ctx.location_lng,
+            max_distance_km: ctx.max_distance_km,
+            must_have: ctx.must_have ?? [],
+            nice_to_have: ctx.nice_to_have ?? [],
+            who_is_searching: ctx.who_is_searching ?? undefined,
+            rooms_needed: ctx.rooms_needed ?? undefined,
+            smart_working: ctx.smart_working ?? false,
+          });
+          systemPrompt = `${SYSTEM_BASE}\n\n${contextMessage}`;
+        }
+      } catch (e) {
+        console.error("[chat/route] Context load error:", e);
       }
     }
 
-    // ─── STEP 2: Search listings in DB BEFORE streaming ───
-    const lastUserMessage = [...messages]
+    // ─── 2. Search listings DIRECTLY from DB ───
+    // Simple, reliable query — no embeddings, no RPC, no keyword filtering
+    const lastUserMsg = [...messages]
       .reverse()
       .find((m: { role: string }) => m.role === "user");
 
-    const isAutoTrigger =
-      lastUserMessage?.content?.includes("Mostrami subito i migliori annunci");
+    const isAutoTrigger = lastUserMsg?.content?.includes(
+      "Mostrami subito i migliori annunci"
+    );
 
-    interface ClientListing {
+    interface DbListing {
       id: string;
       title: string;
       price: number;
@@ -136,153 +113,159 @@ export async function POST(request: NextRequest) {
       has_parking: boolean;
       has_elevator: boolean;
       has_terrace: boolean;
-      match_score: number;
     }
 
-    let listingsForClient: ClientListing[] = [];
-    let listingsSummaryForClaude = "";
+    let listings: DbListing[] = [];
 
-    if (lastUserMessage) {
-      const searchLimit = isAutoTrigger ? 8 : 5;
-      const adjustedFilters = { ...searchFilters };
-      if (isAutoTrigger) {
-        if (adjustedFilters.price_max) {
-          adjustedFilters.price_max = Math.round(adjustedFilters.price_max * 1.2);
-        }
-        if (adjustedFilters.price_min) {
-          adjustedFilters.price_min = Math.round(adjustedFilters.price_min * 0.8);
-        }
-        if (adjustedFilters.max_distance_km) {
-          adjustedFilters.max_distance_km += 5;
-        }
+    try {
+      const supabase = createAdminClient();
+      let query = supabase
+        .from("listings")
+        .select(
+          "id, title, price, price_period, address, city, surface_sqm, rooms, floor, property_type, has_garden, has_parking, has_elevator, has_terrace"
+        )
+        .eq("status", "active")
+        .order("created_at", { ascending: false })
+        .limit(6);
+
+      // Apply basic context filters if available
+      if (contextIntent) {
+        query = query.eq("type", contextIntent === "sale" ? "sale" : "rent");
+      }
+      if (contextBudgetMax) {
+        query = query.lte("price", Math.round(contextBudgetMax * 1.2));
       }
 
-      try {
-        const results = await semanticSearch(
-          lastUserMessage.content,
-          adjustedFilters,
-          searchLimit
-        );
+      const { data, error } = await query;
 
-        if (results.length > 0) {
-          // Data for the SSE listings event (goes to client cards)
-          listingsForClient = results.map((r) => ({
-            id: r.id,
-            title: r.title,
-            price: r.price,
-            price_period: r.price_period,
-            address: r.address,
-            city: r.city,
-            surface_sqm: r.surface_sqm,
-            rooms: r.rooms,
-            floor: r.floor,
-            property_type: r.property_type,
-            has_garden: r.has_garden,
-            has_parking: r.has_parking,
-            has_elevator: r.has_elevator,
-            has_terrace: r.has_terrace,
-            match_score: Math.floor(Math.random() * 16) + 82,
-          }));
-
-          // Plain text summary for Claude (NO JSON, NO hidden blocks)
-          listingsSummaryForClaude = `\n\nHo trovato ${results.length} immobili. Ecco un riepilogo:\n${results
-            .map(
-              (r, i) =>
-                `${i + 1}. "${r.title}" - €${r.price.toLocaleString("it-IT")}${r.price_period === "month" ? "/mese" : ""} - ${r.address}, ${r.city} - ${r.surface_sqm}m² - ${r.rooms} locali${r.floor ? ` - Piano ${r.floor}` : ""} - ${r.property_type}${r.has_parking ? " - Posto auto" : ""}${r.has_garden ? " - Giardino" : ""}${r.has_elevator ? " - Ascensore" : ""}${r.has_terrace ? " - Terrazzo" : ""}`
-            )
-            .join("\n")}\n\nPresenta questi risultati all'utente in modo discorsivo, spiegando perché ciascuno è compatibile con le sue esigenze. Le card visive sono già mostrate all'utente, quindi non ripetere i dati tecnici — concentrati sul perché.`;
-        }
-      } catch {
-        // Search failed — continue without listings
+      if (error) {
+        console.error("[chat/route] DB query error:", error.message);
+        // Try without filters as ultimate fallback
+        const { data: fallbackData } = await supabase
+          .from("listings")
+          .select(
+            "id, title, price, price_period, address, city, surface_sqm, rooms, floor, property_type, has_garden, has_parking, has_elevator, has_terrace"
+          )
+          .eq("status", "active")
+          .limit(6);
+        listings = (fallbackData ?? []) as DbListing[];
+      } else {
+        listings = (data ?? []) as DbListing[];
       }
+    } catch (e) {
+      console.error("[chat/route] Listings search error:", e);
     }
 
-    // ─── STEP 3: Build Claude messages (plain text only) ───
+    console.log(
+      `[chat/route] Found ${listings.length} listings, isAutoTrigger=${isAutoTrigger}`
+    );
+
+    // ─── 3. Build Claude messages ───
     const claudeMessages = messages.map(
       (m: { role: string; content: string }) => ({
         role: m.role as "user" | "assistant",
-        content: m.content,
+        content: m.content || "...",
       })
     );
 
-    // Append plain text listings summary to last user message
-    if (listingsSummaryForClaude && claudeMessages.length > 0) {
-      const last = claudeMessages[claudeMessages.length - 1];
-      if (last.role === "user") {
-        last.content += listingsSummaryForClaude;
+    // Give Claude a plain text summary
+    if (listings.length > 0) {
+      const summary = listings
+        .map(
+          (l, i) =>
+            `${i + 1}. "${l.title}" - €${l.price.toLocaleString("it-IT")}${l.price_period === "month" ? "/mese" : ""} - ${l.city} - ${l.surface_sqm}m² - ${l.rooms} locali`
+        )
+        .join("\n");
+
+      const lastMsg = claudeMessages[claudeMessages.length - 1];
+      if (lastMsg?.role === "user") {
+        lastMsg.content += `\n\n[Ho trovato ${listings.length} immobili. Le card sono già visibili all'utente. Presenta i risultati in modo discorsivo, concentrandoti sul perché sono adatti:]\n${summary}`;
       }
     }
 
-    // For wizard auto-trigger
     if (isAutoTrigger) {
-      systemPrompt += `\n\nL'utente ha appena completato il wizard di configurazione. Presenta subito i risultati trovati in modo discorsivo. Se non ci sono risultati, suggerisci di ampliare la ricerca.`;
+      systemPrompt +=
+        "\n\nL'utente ha appena completato il wizard. Presenta subito i risultati trovati. Se non ci sono risultati, suggerisci di ampliare la ricerca.";
     }
 
-    // ─── STEP 4: Create combined SSE stream ───
-    let claudeStream: ReadableStream<Uint8Array>;
-    try {
-      claudeStream = streamChat({
-        systemPrompt,
-        messages: claudeMessages,
-      });
-    } catch (err) {
-      console.error("[chat/route] Errore creazione stream Claude:", err);
-      return sseError("Si è verificato un errore con l'AI. Riprova tra poco.");
-    }
-
-    const combinedStream = new ReadableStream({
+    // ─── 4. Create SSE stream ───
+    const stream = new ReadableStream({
       async start(controller) {
         try {
-          // FIRST: send listings event immediately (before any Claude text)
-          if (listingsForClient.length > 0) {
-            controller.enqueue(
-              sseEncode({ type: "listings", data: listingsForClient })
-            );
+          // STEP A: send listings event FIRST
+          if (listings.length > 0) {
+            send(controller, {
+              type: "listings",
+              data: listings.map((l, i) => ({
+                id: l.id,
+                title: l.title,
+                price: l.price,
+                price_period: l.price_period,
+                address: l.address,
+                city: l.city,
+                surface_sqm: l.surface_sqm,
+                rooms: l.rooms,
+                floor: l.floor,
+                property_type: l.property_type,
+                has_garden: l.has_garden,
+                has_parking: l.has_parking,
+                has_elevator: l.has_elevator,
+                has_terrace: l.has_terrace,
+                match_score: 95 - i * 4, // 95, 91, 87, 83, 79, 75
+              })),
+            });
           }
 
-          // THEN: pipe Claude's streaming text
-          const reader = claudeStream.getReader();
-          try {
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              controller.enqueue(value);
+          // STEP B: stream Claude response
+          const client = new Anthropic({
+            apiKey: process.env.ANTHROPIC_API_KEY,
+          });
+
+          const claudeStream = client.messages.stream({
+            model: "claude-sonnet-4-5",
+            max_tokens: 1024,
+            system: systemPrompt,
+            messages: claudeMessages,
+          });
+
+          for await (const chunk of claudeStream) {
+            if (
+              chunk.type === "content_block_delta" &&
+              chunk.delta.type === "text_delta" &&
+              chunk.delta.text
+            ) {
+              send(controller, { type: "text", content: chunk.delta.text });
             }
-          } catch (streamErr) {
-            console.error("[chat/route] Stream error:", streamErr);
-            controller.enqueue(
-              sseEncode({
-                type: "error",
-                content: "Errore durante la generazione della risposta.",
-              })
-            );
-          } finally {
-            reader.releaseLock();
           }
 
-          // LAST: always send done
-          controller.enqueue(sseEncode({ type: "done" }));
-        } catch (err) {
-          console.error("[chat/route] Combined stream error:", err);
-          controller.enqueue(
-            sseEncode({ type: "error", content: "Errore interno." })
-          );
-          controller.enqueue(sseEncode({ type: "done" }));
+          // STEP C: done
+          send(controller, { type: "done" });
+        } catch (error) {
+          console.error("[chat/route] Stream error:", error);
+          send(controller, {
+            type: "error",
+            content:
+              error instanceof Error
+                ? error.message
+                : "Errore durante la generazione della risposta.",
+          });
+          send(controller, { type: "done" });
         } finally {
           controller.close();
         }
       },
     });
 
-    return new Response(combinedStream, {
+    return new Response(stream, {
       headers: {
         "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
+        "Cache-Control": "no-cache, no-transform",
         Connection: "keep-alive",
+        "X-Accel-Buffering": "no",
       },
     });
   } catch (err) {
-    console.error("[chat/route] Errore non gestito:", err);
+    console.error("[chat/route] Unhandled error:", err);
     return new Response(
       JSON.stringify({ error: "Errore interno del server" }),
       { status: 500, headers: { "Content-Type": "application/json" } }
