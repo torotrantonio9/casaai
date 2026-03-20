@@ -61,10 +61,10 @@ export function ChatWidget({
   const [customPlaceholder, setCustomPlaceholder] = useState(
     inputPlaceholder ?? "Descrivi la casa dei tuoi sogni..."
   );
+  const [shownListingIds, setShownListingIds] = useState<string[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const autoSentRef = useRef(false);
-  const shownListingIdsRef = useRef<string[]>([]);
 
   const scrollToBottom = useCallback(() => {
     scrollRef.current?.scrollTo({
@@ -102,7 +102,7 @@ export function ChatWidget({
             session_id: sessionId,
             context_id: contextId,
             is_auto_trigger: options?.isAutoTrigger ?? false,
-            shown_listing_ids: shownListingIdsRef.current,
+            shown_listing_ids: shownListingIds,
           }),
           signal: abortRef.current.signal,
         });
@@ -138,11 +138,11 @@ export function ChatWidget({
               console.log("SSE EVENT:", event.type, event);
 
               if (event.type === "listings" && event.data?.length > 0) {
-                // Track shown listing IDs
+                // Track shown listing IDs (BUG 4 fix: use state)
                 const newIds = event.data.map((l: ListingCard) => l.id);
-                shownListingIdsRef.current = [
-                  ...new Set([...shownListingIdsRef.current, ...newIds]),
-                ];
+                setShownListingIds((prev) => [
+                  ...new Set([...prev, ...newIds]),
+                ]);
                 // Insert listings as their own message
                 setMessages((prev) => [
                   ...prev,
@@ -214,7 +214,7 @@ export function ChatWidget({
         options?.onDone?.();
       }
     },
-    [sessionId, contextId, streamingText]
+    [sessionId, contextId, streamingText, shownListingIds]
   );
 
   // Auto-send message after wizard completion

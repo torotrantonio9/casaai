@@ -148,7 +148,7 @@ function ResultCard({ listing }: { listing: ListingCard }) {
         >
           <span>⇄ {listing.rooms} locali</span>
           <span>⬚ {listing.surface_sqm}m²</span>
-          {listing.floor != null && <span>▤ {listing.floor}° piano</span>}
+          {listing.floor != null && listing.floor > 0 && <span>▤ {listing.floor}° piano</span>}
         </div>
 
         {/* AI reason */}
