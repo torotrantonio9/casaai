@@ -13,6 +13,9 @@ export async function POST(request: NextRequest) {
       must_have = [],
       nice_to_have = [],
       custom_note,
+      who_is_searching,
+      rooms_needed,
+      smart_working,
     } = body;
 
     if (!intent || !budget_max) {
@@ -41,6 +44,9 @@ export async function POST(request: NextRequest) {
         max_distance_km: max_distance_km ?? null,
         must_have,
         nice_to_have,
+        who_is_searching: who_is_searching ?? null,
+        rooms_needed: rooms_needed ?? null,
+        smart_working: smart_working ?? false,
       })
       .select("id")
       .single();
@@ -65,6 +71,9 @@ export async function POST(request: NextRequest) {
         must_have,
         nice_to_have,
         custom_note,
+        who_is_searching,
+        rooms_needed,
+        smart_working,
       },
     });
 

@@ -46,9 +46,9 @@ function matchBadgeColor(score: number): string {
 }
 
 function listingEmoji(listing: ListingCard): string {
-  if (listing.property_type === "apartment") return "🏢";
-  if (listing.has_garden) return "🌿";
-  return "🏠";
+  if (listing.property_type === "apartment") return "\u{1F3E2}";
+  if (listing.has_garden) return "\u{1F33F}";
+  return "\u{1F3E0}";
 }
 
 /* ───────── Single listing card ───────── */
@@ -293,6 +293,9 @@ export function ChatMessages({
         </motion.div>
       ))}
 
+      {/* Listing cards — shown immediately when received via SSE */}
+      {listings.length > 0 && <ListingsBlock listings={listings} />}
+
       {/* Streaming message */}
       {isStreaming && streamingText && (
         <motion.div
@@ -342,9 +345,6 @@ export function ChatMessages({
           </div>
         </div>
       )}
-
-      {/* Listing cards — visual block */}
-      {listings.length > 0 && <ListingsBlock listings={listings} />}
     </div>
   );
 }

@@ -13,10 +13,21 @@ type FeatureKey =
   | "ground_floor"
   | "has_cellar"
   | "energy_class_ab"
-  | "has_pool";
+  | "has_pool"
+  | "high_floor"
+  | "quiet_area"
+  | "near_metro"
+  | "near_schools"
+  | "near_hospital"
+  | "green_area";
+
+export type WhoIsSearching = "solo" | "coppia" | "famiglia" | "investimento";
 
 export interface ChatContext {
   intent: "sale" | "rent";
+  who_is_searching: WhoIsSearching;
+  rooms_needed: 1 | 2 | 3 | 4;
+  smart_working: boolean;
   budget_max: number;
   budget_min?: number;
   location: {
@@ -30,6 +41,20 @@ export interface ChatContext {
   custom_note?: string;
 }
 
+const WHO_OPTIONS: { key: WhoIsSearching; label: string; emoji: string }[] = [
+  { key: "solo", label: "Solo/a", emoji: "\u{1F464}" },
+  { key: "coppia", label: "Coppia", emoji: "\u{1F46B}" },
+  { key: "famiglia", label: "Famiglia", emoji: "\u{1F468}\u200D\u{1F469}\u200D\u{1F467}" },
+  { key: "investimento", label: "Investimento", emoji: "\u{1F3E2}" },
+];
+
+const ROOMS_OPTIONS: { value: 1 | 2 | 3 | 4; label: string }[] = [
+  { value: 1, label: "Monolocale" },
+  { value: 2, label: "2 locali" },
+  { value: 3, label: "3 locali" },
+  { value: 4, label: "4+ locali" },
+];
+
 const FEATURES: { key: FeatureKey; label: string; emoji: string }[] = [
   { key: "has_elevator", label: "Ascensore", emoji: "\u{1F6D7}" },
   { key: "has_parking", label: "Posto auto", emoji: "\u{1F697}" },
@@ -41,6 +66,12 @@ const FEATURES: { key: FeatureKey; label: string; emoji: string }[] = [
   { key: "has_cellar", label: "Cantina", emoji: "\u{1F4E6}" },
   { key: "energy_class_ab", label: "Classe A/B", emoji: "\u{26A1}" },
   { key: "has_pool", label: "Piscina", emoji: "\u{1F3CA}" },
+  { key: "high_floor", label: "Piano alto", emoji: "\u{1F31E}" },
+  { key: "quiet_area", label: "Zona silenziosa", emoji: "\u{1F507}" },
+  { key: "near_metro", label: "Vicino metro", emoji: "\u{1F687}" },
+  { key: "near_schools", label: "Vicino scuole", emoji: "\u{1F3EB}" },
+  { key: "near_hospital", label: "Vicino ospedale", emoji: "\u{1F3E5}" },
+  { key: "green_area", label: "Zona verde", emoji: "\u{1F333}" },
 ];
 
 const DISTANCES = [5, 10, 20, 30] as const;
@@ -54,6 +85,9 @@ export function ChatOnboarding({ onComplete, onSkip }: Props) {
   const [step, setStep] = useState(0);
   const [context, setContext] = useState<ChatContext>({
     intent: "sale",
+    who_is_searching: "solo",
+    rooms_needed: 2,
+    smart_working: false,
     budget_max: 300000,
     location: null,
     max_distance_km: 10,
@@ -61,7 +95,7 @@ export function ChatOnboarding({ onComplete, onSkip }: Props) {
     nice_to_have: [],
   });
 
-  const totalSteps = 4;
+  const totalSteps = 6;
 
   function next() {
     if (step < totalSteps - 1) {
@@ -167,8 +201,80 @@ export function ChatOnboarding({ onComplete, onSkip }: Props) {
             </div>
           )}
 
-          {/* Step 1: Budget */}
+          {/* Step 1: Who is searching */}
           {step === 1 && (
+            <div className="space-y-4">
+              <h3 className="text-xl font-bold" style={{ color: "#111827" }}>
+                Per chi stai cercando?
+              </h3>
+              <div className="grid grid-cols-2 gap-3">
+                {WHO_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.key}
+                    onClick={() =>
+                      setContext((p) => ({ ...p, who_is_searching: opt.key }))
+                    }
+                    className="rounded-xl border-2 p-4 text-center transition-all"
+                    style={
+                      context.who_is_searching === opt.key
+                        ? selectedStyle
+                        : unselectedStyle
+                    }
+                  >
+                    <span className="text-2xl">{opt.emoji}</span>
+                    <p className="mt-1 font-semibold">{opt.label}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Step 2: Rooms */}
+          {step === 2 && (
+            <div className="space-y-4">
+              <h3 className="text-xl font-bold" style={{ color: "#111827" }}>
+                Di quante stanze hai bisogno?
+              </h3>
+              <div className="flex gap-2">
+                {ROOMS_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    onClick={() =>
+                      setContext((p) => ({ ...p, rooms_needed: opt.value }))
+                    }
+                    className="flex-1 rounded-lg border-2 px-3 py-3 text-sm font-semibold transition-all"
+                    style={
+                      context.rooms_needed === opt.value
+                        ? selectedStyle
+                        : unselectedStyle
+                    }
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+              <label
+                className="mt-3 flex items-center gap-3 cursor-pointer"
+                style={{ color: "#111827" }}
+              >
+                <input
+                  type="checkbox"
+                  checked={context.smart_working}
+                  onChange={(e) =>
+                    setContext((p) => ({ ...p, smart_working: e.target.checked }))
+                  }
+                  className="h-5 w-5 rounded border-gray-300"
+                  style={{ accentColor: "#1e40af" }}
+                />
+                <span className="text-sm font-medium">
+                  Stanza dedicata allo smart working
+                </span>
+              </label>
+            </div>
+          )}
+
+          {/* Step 3: Budget */}
+          {step === 3 && (
             <div className="space-y-4">
               <h3 className="text-xl font-bold" style={{ color: "#111827" }}>
                 Qual è il tuo budget massimo?
@@ -201,8 +307,8 @@ export function ChatOnboarding({ onComplete, onSkip }: Props) {
             </div>
           )}
 
-          {/* Step 2: Location + Distance */}
-          {step === 2 && (
+          {/* Step 4: Location + Distance */}
+          {step === 4 && (
             <div className="space-y-4">
               <h3 className="text-xl font-bold" style={{ color: "#111827" }}>
                 Da dove vuoi partire?
@@ -255,8 +361,8 @@ export function ChatOnboarding({ onComplete, onSkip }: Props) {
             </div>
           )}
 
-          {/* Step 3: Features */}
-          {step === 3 && (
+          {/* Step 5: Features */}
+          {step === 5 && (
             <div className="space-y-4">
               <h3 className="text-xl font-bold" style={{ color: "#111827" }}>
                 Cosa non può mancare?

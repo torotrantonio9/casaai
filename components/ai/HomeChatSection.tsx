@@ -16,6 +16,19 @@ const FEATURE_LABELS: Record<string, string> = {
   accessible: "accessibile",
   ground_floor: "piano terra",
   energy_class_ab: "classe energetica A/B",
+  high_floor: "piano alto",
+  quiet_area: "zona silenziosa",
+  near_metro: "vicino metro",
+  near_schools: "vicino scuole",
+  near_hospital: "vicino ospedale",
+  green_area: "zona verde",
+};
+
+const WHO_LABELS: Record<string, string> = {
+  solo: "persona sola",
+  coppia: "coppia",
+  famiglia: "famiglia",
+  investimento: "investimento",
 };
 
 export function HomeChatSection() {
@@ -48,13 +61,22 @@ export function HomeChatSection() {
         const locationLabel = context.location?.label
           ? ` nel raggio di ${context.max_distance_km ?? 10}km da ${context.location.label}`
           : "";
+        const whoLabel = context.who_is_searching
+          ? ` per ${WHO_LABELS[context.who_is_searching] ?? context.who_is_searching}`
+          : "";
+        const roomsLabel = context.rooms_needed
+          ? `, ${context.rooms_needed === 1 ? "monolocale" : `${context.rooms_needed} locali`}`
+          : "";
+        const smartLabel = context.smart_working
+          ? ", con studio per smart working"
+          : "";
         const featuresLabel =
           context.must_have.length > 0
             ? `, con ${context.must_have.map((f) => FEATURE_LABELS[f] ?? f).join(", ")}`
             : "";
 
         setWelcomeMessage(
-          `Perfetto! Ho impostato la tua ricerca: ${intentLabel} fino a ${budgetLabel}${locationLabel}${featuresLabel}. Sto cercando le migliori proposte per te...`
+          `Perfetto! Ho impostato la tua ricerca: ${intentLabel}${whoLabel} fino a ${budgetLabel}${roomsLabel}${locationLabel}${smartLabel}${featuresLabel}. Sto cercando le migliori proposte per te...`
         );
 
         // Auto-trigger first search with 500ms delay

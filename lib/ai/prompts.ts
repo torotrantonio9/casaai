@@ -48,6 +48,13 @@ function translateFeature(f: string): string {
   return FEATURE_IT[f] ?? f;
 }
 
+const WHO_LABELS: Record<string, string> = {
+  solo: "Persona sola",
+  coppia: "Coppia",
+  famiglia: "Famiglia con bambini",
+  investimento: "Investitore",
+};
+
 export function buildContextMessage(context: {
   intent: string;
   budget_min?: number;
@@ -59,6 +66,9 @@ export function buildContextMessage(context: {
   must_have: string[];
   nice_to_have: string[];
   custom_note?: string;
+  who_is_searching?: string;
+  rooms_needed?: number;
+  smart_working?: boolean;
 }): string {
   const intentLabel = context.intent === "sale" ? "Acquisto" : "Affitto";
   const budgetStr =
@@ -78,6 +88,17 @@ export function buildContextMessage(context: {
     );
   } else {
     parts.push(`- Budget massimo: ${budgetStr}`);
+  }
+
+  if (context.who_is_searching) {
+    parts.push(`- Chi cerca: ${WHO_LABELS[context.who_is_searching] ?? context.who_is_searching}`);
+  }
+  if (context.rooms_needed) {
+    const roomsLabel = context.rooms_needed === 1 ? "Monolocale" : `${context.rooms_needed} locali`;
+    parts.push(`- Stanze necessarie: ${roomsLabel}`);
+  }
+  if (context.smart_working) {
+    parts.push(`- Smart working: sì, serve studio dedicato`);
   }
 
   if (context.location_label) {

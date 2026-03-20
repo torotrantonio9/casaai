@@ -118,6 +118,7 @@ export function ChatWidget({
                     .replace(/<!--LISTING_SCORES:[\s\S]*?-->/, "");
                   setStreamingText(displayText);
                 } else if (event.type === "listings") {
+                  console.log("LISTINGS EVENT:", event);
                   setListings(event.data);
                 } else if (event.type === "error") {
                   setMessages((prev) => [
