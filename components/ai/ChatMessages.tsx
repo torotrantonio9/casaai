@@ -4,11 +4,6 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { motion } from "framer-motion";
 
-export interface ChatMessage {
-  role: "user" | "assistant";
-  content: string;
-}
-
 export interface ListingCard {
   id: string;
   title: string;
@@ -30,9 +25,16 @@ export interface ListingCard {
   match_score?: number;
 }
 
+export interface ChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  type: "text" | "listings";
+  content: string;
+  listings?: ListingCard[];
+}
+
 interface Props {
   messages: ChatMessage[];
-  listings: ListingCard[];
   isStreaming: boolean;
   streamingText: string;
 }
@@ -258,43 +260,53 @@ function ListingsBlock({ listings }: { listings: ListingCard[] }) {
 
 export function ChatMessages({
   messages,
-  listings,
   isStreaming,
   streamingText,
 }: Props) {
   return (
     <div className="flex flex-col gap-3 p-4">
-      {messages.map((msg, i) => (
-        <motion.div
-          key={i}
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-        >
-          <div
-            className="max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed"
-            style={
-              msg.role === "user"
-                ? {
-                    background: "#1e40af",
-                    color: "#ffffff",
-                    borderBottomRightRadius: 0,
-                  }
-                : {
-                    background: "#f9fafb",
-                    color: "#111827",
-                    border: "1px solid #e2e8f0",
-                    borderBottomLeftRadius: 0,
-                  }
-            }
-          >
-            {msg.content}
-          </div>
-        </motion.div>
-      ))}
+      {messages.map((msg) => {
+        /* ── Listings message ── */
+        if (
+          msg.type === "listings" &&
+          msg.listings &&
+          msg.listings.length > 0
+        ) {
+          return <ListingsBlock key={msg.id} listings={msg.listings} />;
+        }
 
-      {/* Listing cards — shown immediately when received via SSE */}
-      {listings.length > 0 && <ListingsBlock listings={listings} />}
+        /* ── Text message (user or assistant) ── */
+        if (!msg.content) return null;
+
+        return (
+          <motion.div
+            key={msg.id}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+          >
+            <div
+              className="max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap"
+              style={
+                msg.role === "user"
+                  ? {
+                      background: "#1e40af",
+                      color: "#ffffff",
+                      borderBottomRightRadius: 0,
+                    }
+                  : {
+                      background: "#f9fafb",
+                      color: "#111827",
+                      border: "1px solid #e2e8f0",
+                      borderBottomLeftRadius: 0,
+                    }
+              }
+            >
+              {msg.content}
+            </div>
+          </motion.div>
+        );
+      })}
 
       {/* Streaming message */}
       {isStreaming && streamingText && (
@@ -304,7 +316,7 @@ export function ChatMessages({
           className="flex justify-start"
         >
           <div
-            className="max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed"
+            className="max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap"
             style={{
               background: "#f9fafb",
               color: "#111827",

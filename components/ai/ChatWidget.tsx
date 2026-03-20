@@ -12,6 +12,29 @@ interface Props {
   initialDisabled?: boolean;
 }
 
+let msgCounter = 0;
+function nextId(): string {
+  msgCounter += 1;
+  return `msg-${Date.now()}-${msgCounter}`;
+}
+
+function makeTextMsg(
+  role: "user" | "assistant",
+  content: string
+): ChatMessage {
+  return { id: nextId(), role, type: "text", content, listings: [] };
+}
+
+function makeListingsMsg(listings: ListingCard[]): ChatMessage {
+  return {
+    id: nextId(),
+    role: "assistant",
+    type: "listings",
+    content: "",
+    listings,
+  };
+}
+
 export function ChatWidget({
   sessionId,
   contextId,
@@ -22,20 +45,18 @@ export function ChatWidget({
 }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>(() => {
     if (welcomeMessage) {
-      return [{ role: "assistant", content: welcomeMessage }];
+      return [makeTextMsg("assistant", welcomeMessage)];
     }
     return [
-      {
-        role: "assistant",
-        content:
-          "Ciao! Sono l'assistente AI di CasaAI. Dimmi come vorresti vivere e ti aiuterò a trovare la casa perfetta.",
-      },
+      makeTextMsg(
+        "assistant",
+        "Ciao! Sono l'assistente AI di CasaAI. Dimmi come vorresti vivere e ti aiuterò a trovare la casa perfetta."
+      ),
     ];
   });
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingText, setStreamingText] = useState("");
-  const [listings, setListings] = useState<ListingCard[]>([]);
   const [inputEnabled, setInputEnabled] = useState(!initialDisabled);
   const [customPlaceholder, setCustomPlaceholder] = useState(
     inputPlaceholder ?? "Descrivi la casa dei tuoi sogni..."
@@ -62,7 +83,6 @@ export function ChatWidget({
     ) => {
       setIsStreaming(true);
       setStreamingText("");
-      setListings([]);
 
       abortRef.current = new AbortController();
       const timeoutId = setTimeout(() => abortRef.current?.abort(), 45000);
@@ -72,10 +92,12 @@ export function ChatWidget({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            messages: allMessages.map((m) => ({
-              role: m.role,
-              content: m.content,
-            })),
+            messages: allMessages
+              .filter((m) => m.type === "text" && m.content)
+              .map((m) => ({
+                role: m.role,
+                content: m.content,
+              })),
             session_id: sessionId,
             context_id: contextId,
           }),
@@ -92,101 +114,111 @@ export function ChatWidget({
 
         const decoder = new TextDecoder();
         let fullText = "";
-        let sseBuffer = "";
+        let buffer = "";
 
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
 
-          sseBuffer += decoder.decode(value, { stream: true });
-          const parts = sseBuffer.split("\n\n");
-          sseBuffer = parts.pop() ?? "";
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split("\n\n");
+          buffer = parts.pop() || "";
 
           for (const part of parts) {
-            const lines = part.split("\n");
-            for (const line of lines) {
-              if (!line.startsWith("data: ")) continue;
-              const jsonStr = line.slice(6).trim();
-              if (!jsonStr) continue;
+            const line = part.trim();
+            if (!line.startsWith("data: ")) continue;
+            const raw = line.slice(6).trim();
+            if (raw === "[DONE]") continue;
 
-              try {
-                const event = JSON.parse(jsonStr);
-                if (event.type === "text") {
-                  fullText += event.content;
-                  const displayText = fullText
-                    .replace(/<!--FILTERS:[\s\S]*?-->/, "")
-                    .replace(/<!--LISTING_SCORES:[\s\S]*?-->/, "");
-                  setStreamingText(displayText);
-                } else if (event.type === "listings") {
-                  console.log("LISTINGS EVENT:", event);
-                  setListings(event.data);
-                } else if (event.type === "error") {
+            try {
+              const event = JSON.parse(raw);
+              console.log("SSE EVENT:", event.type, event);
+
+              if (event.type === "listings" && event.data?.length > 0) {
+                // Insert listings as their own message
+                setMessages((prev) => [
+                  ...prev,
+                  makeListingsMsg(event.data),
+                ]);
+              } else if (event.type === "text" && event.content) {
+                fullText += event.content;
+                const displayText = fullText
+                  .replace(/<!--FILTERS:[\s\S]*?-->/, "")
+                  .replace(/<!--LISTING_SCORES:[\s\S]*?-->/, "");
+                setStreamingText(displayText);
+              } else if (event.type === "error") {
+                setMessages((prev) => [
+                  ...prev,
+                  makeTextMsg(
+                    "assistant",
+                    event.content ??
+                      "Si è verificato un errore. Riprova tra poco."
+                  ),
+                ]);
+                setStreamingText("");
+              } else if (event.type === "done") {
+                // Extract AI scores for listings
+                const scoresMatch = fullText.match(
+                  /<!--LISTING_SCORES:([\s\S]*?)-->/
+                );
+                if (scoresMatch) {
+                  try {
+                    const scores = JSON.parse(scoresMatch[1]) as {
+                      id: string;
+                      match_score?: number;
+                      ai_reason?: string;
+                    }[];
+                    // Update the listings message with AI scores
+                    setMessages((prev) =>
+                      prev.map((m) => {
+                        if (m.type !== "listings" || !m.listings) return m;
+                        return {
+                          ...m,
+                          listings: m.listings.map((l) => {
+                            const s = scores.find((sc) => sc.id === l.id);
+                            if (s) {
+                              return {
+                                ...l,
+                                match_score: s.match_score ?? l.match_score,
+                                ai_reason: s.ai_reason ?? l.ai_reason,
+                              };
+                            }
+                            return l;
+                          }),
+                        };
+                      })
+                    );
+                  } catch {
+                    // ignore parse errors
+                  }
+                }
+
+                const displayText = fullText
+                  .replace(/<!--FILTERS:[\s\S]*?-->/, "")
+                  .replace(/<!--LISTING_SCORES:[\s\S]*?-->/, "");
+                if (displayText.trim()) {
                   setMessages((prev) => [
                     ...prev,
-                    {
-                      role: "assistant",
-                      content:
-                        event.content ??
-                        "Si è verificato un errore. Riprova tra poco.",
-                    },
+                    makeTextMsg("assistant", displayText),
                   ]);
-                  setStreamingText("");
-                } else if (event.type === "done") {
-                  // Extract AI scores for listings
-                  const scoresMatch = fullText.match(
-                    /<!--LISTING_SCORES:([\s\S]*?)-->/
-                  );
-                  if (scoresMatch) {
-                    try {
-                      const scores = JSON.parse(scoresMatch[1]) as {
-                        id: string;
-                        match_score?: number;
-                        ai_reason?: string;
-                      }[];
-                      setListings((prev) =>
-                        prev.map((l) => {
-                          const s = scores.find((sc) => sc.id === l.id);
-                          if (s) {
-                            return {
-                              ...l,
-                              match_score: s.match_score ?? l.match_score,
-                              ai_reason: s.ai_reason ?? l.ai_reason,
-                            };
-                          }
-                          return l;
-                        })
-                      );
-                    } catch {
-                      // ignore parse errors
-                    }
-                  }
-
-                  const displayText = fullText
-                    .replace(/<!--FILTERS:[\s\S]*?-->/, "")
-                    .replace(/<!--LISTING_SCORES:[\s\S]*?-->/, "");
-                  if (displayText.trim()) {
-                    setMessages((prev) => [
-                      ...prev,
-                      { role: "assistant", content: displayText },
-                    ]);
-                  }
-                  setStreamingText("");
                 }
-              } catch {
-                // Skip malformed JSON
+                setStreamingText("");
               }
+            } catch (e) {
+              console.warn("SSE parse error:", raw, e);
             }
           }
         }
 
-        if (fullText) {
+        // Fallback: if stream ended without "done" event
+        if (fullText && streamingText) {
           const displayText = fullText
             .replace(/<!--FILTERS:[\s\S]*?-->/, "")
             .replace(/<!--LISTING_SCORES:[\s\S]*?-->/, "");
-          if (displayText.trim() && streamingText) {
+          if (displayText.trim()) {
             setMessages((prev) => [
               ...prev,
-              { role: "assistant", content: displayText },
+              makeTextMsg("assistant", displayText),
             ]);
             setStreamingText("");
           }
@@ -195,11 +227,10 @@ export function ChatWidget({
         if (err instanceof DOMException && err.name === "AbortError") {
           setMessages((prev) => [
             ...prev,
-            {
-              role: "assistant",
-              content:
-                "La risposta ha impiegato troppo tempo. Riprova tra poco.",
-            },
+            makeTextMsg(
+              "assistant",
+              "La risposta ha impiegato troppo tempo. Riprova tra poco."
+            ),
           ]);
           setStreamingText("");
           return;
@@ -210,7 +241,7 @@ export function ChatWidget({
             : "Si è verificato un errore. Riprova tra poco.";
         setMessages((prev) => [
           ...prev,
-          { role: "assistant", content: errorMsg },
+          makeTextMsg("assistant", errorMsg),
         ]);
         setStreamingText("");
       } finally {
@@ -227,7 +258,7 @@ export function ChatWidget({
   useEffect(() => {
     if (autoMessage && !autoSentRef.current && sessionId) {
       autoSentRef.current = true;
-      const autoMsg: ChatMessage = { role: "user", content: autoMessage };
+      const autoMsg = makeTextMsg("user", autoMessage);
       // Don't show auto-message in chat — it's hidden
       const allMsgs = [...messages, autoMsg];
       streamChatMessage(allMsgs, {
@@ -245,7 +276,7 @@ export function ChatWidget({
     const text = input.trim();
     if (!text || isStreaming) return;
 
-    const userMessage: ChatMessage = { role: "user", content: text };
+    const userMessage = makeTextMsg("user", text);
     const newMessages = [...messages, userMessage];
     setMessages(newMessages);
     setInput("");
@@ -267,7 +298,6 @@ export function ChatWidget({
       <div ref={scrollRef} className="flex-1 overflow-y-auto">
         <ChatMessages
           messages={messages}
-          listings={listings}
           isStreaming={isStreaming}
           streamingText={streamingText}
         />
@@ -286,7 +316,6 @@ export function ChatWidget({
           disabled={isStreaming || !inputEnabled}
           style={{ color: "#111827", background: "#ffffff" }}
           className="flex-1 rounded-lg border px-3 py-2 text-sm focus:ring-1 focus:outline-none disabled:opacity-50"
-          // Explicit inline border colors for clarity
           onFocus={(e) => (e.currentTarget.style.borderColor = "#1e40af")}
           onBlur={(e) => (e.currentTarget.style.borderColor = "#cbd5e1")}
         />
@@ -295,8 +324,12 @@ export function ChatWidget({
           disabled={isStreaming || !input.trim() || !inputEnabled}
           className="rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
           style={{ background: "#1e40af" }}
-          onMouseEnter={(e) => (e.currentTarget.style.background = "#1d3461")}
-          onMouseLeave={(e) => (e.currentTarget.style.background = "#1e40af")}
+          onMouseEnter={(e) =>
+            (e.currentTarget.style.background = "#1d3461")
+          }
+          onMouseLeave={(e) =>
+            (e.currentTarget.style.background = "#1e40af")
+          }
         >
           Invia
         </button>
