@@ -24,6 +24,24 @@ Quando presenti risultati di ricerca:
 2. Per ogni risultato, una breve descrizione (2-3 righe) del perché è compatibile
 3. Invito a raffinare o contattare l'agenzia`;
 
+/* ─── Intent detection helpers ─── */
+
+const WANTS_NEW_LISTINGS_RE =
+  /\b(mostra|cerca|trova|vedi|altri|nuov[ie]|divers[ie]|alternativ[ie]|cambia|aggiorna|ricerc[ao]|proposte|annunci|risultati|opzioni)\b/i;
+
+const IS_QUESTION_RE =
+  /\b(qual[eè]|com'è|quanto|dove|perch[eé]|dimmi|spieg|confronta|differenz|megli[oa]|consigli|consiglia|preferisci|suggeris)\b/i;
+
+function detectMessageIntent(text: string): {
+  wantsNewListings: boolean;
+  isQuestion: boolean;
+} {
+  return {
+    wantsNewListings: WANTS_NEW_LISTINGS_RE.test(text),
+    isQuestion: IS_QUESTION_RE.test(text),
+  };
+}
+
 export async function POST(request: NextRequest) {
   const encoder = new TextEncoder();
 
@@ -41,7 +59,12 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { messages, session_id } = body;
+    const {
+      messages,
+      session_id,
+      is_auto_trigger = false,
+      shown_listing_ids = [],
+    } = body;
 
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
       return new Response(
@@ -88,16 +111,31 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // ─── 2. Search listings DIRECTLY from DB ───
-    // Simple, reliable query — no embeddings, no RPC, no keyword filtering
+    // ─── 2. Determine search intent ───
     const lastUserMsg = [...messages]
       .reverse()
       .find((m: { role: string }) => m.role === "user");
+    const lastText = lastUserMsg?.content ?? "";
 
-    const isAutoTrigger = lastUserMsg?.content?.includes(
-      "Mostrami subito i migliori annunci"
+    const isAutoTrigger =
+      is_auto_trigger ||
+      lastText.includes("Mostrami subito i migliori annunci");
+
+    const hasShownListings =
+      Array.isArray(shown_listing_ids) && shown_listing_ids.length > 0;
+
+    const isFirstSearch = isAutoTrigger || !hasShownListings;
+
+    const { wantsNewListings, isQuestion } = detectMessageIntent(lastText);
+
+    // Decide whether to send listings
+    const shouldSendListings = isFirstSearch || wantsNewListings;
+
+    console.log(
+      `[chat/route] isFirstSearch=${isFirstSearch}, wantsNewListings=${wantsNewListings}, isQuestion=${isQuestion}, hasShownListings=${hasShownListings}, shouldSendListings=${shouldSendListings}`
     );
 
+    // ─── 3. Search listings (only if needed) ───
     interface DbListing {
       id: string;
       title: string;
@@ -117,50 +155,63 @@ export async function POST(request: NextRequest) {
 
     let listings: DbListing[] = [];
 
-    try {
-      const supabase = createAdminClient();
-      let query = supabase
-        .from("listings")
-        .select(
-          "id, title, price, price_period, address, city, surface_sqm, rooms, floor, property_type, has_garden, has_parking, has_elevator, has_terrace"
-        )
-        .eq("status", "active")
-        .order("created_at", { ascending: false })
-        .limit(6);
-
-      // Apply basic context filters if available
-      if (contextIntent) {
-        query = query.eq("type", contextIntent === "sale" ? "sale" : "rent");
-      }
-      if (contextBudgetMax) {
-        query = query.lte("price", Math.round(contextBudgetMax * 1.2));
-      }
-
-      const { data, error } = await query;
-
-      if (error) {
-        console.error("[chat/route] DB query error:", error.message);
-        // Try without filters as ultimate fallback
-        const { data: fallbackData } = await supabase
+    if (shouldSendListings) {
+      try {
+        const supabase = createAdminClient();
+        let query = supabase
           .from("listings")
           .select(
             "id, title, price, price_period, address, city, surface_sqm, rooms, floor, property_type, has_garden, has_parking, has_elevator, has_terrace"
           )
           .eq("status", "active")
+          .order("created_at", { ascending: false })
           .limit(6);
-        listings = (fallbackData ?? []) as DbListing[];
-      } else {
-        listings = (data ?? []) as DbListing[];
+
+        // Apply basic context filters if available
+        if (contextIntent) {
+          query = query.eq(
+            "type",
+            contextIntent === "sale" ? "sale" : "rent"
+          );
+        }
+        if (contextBudgetMax) {
+          query = query.lte("price", Math.round(contextBudgetMax * 1.2));
+        }
+
+        // If refinement, exclude already-shown listings
+        if (wantsNewListings && hasShownListings) {
+          query = query.not(
+            "id",
+            "in",
+            `(${(shown_listing_ids as string[]).join(",")})`
+          );
+        }
+
+        const { data, error } = await query;
+
+        if (error) {
+          console.error("[chat/route] DB query error:", error.message);
+          const { data: fallbackData } = await supabase
+            .from("listings")
+            .select(
+              "id, title, price, price_period, address, city, surface_sqm, rooms, floor, property_type, has_garden, has_parking, has_elevator, has_terrace"
+            )
+            .eq("status", "active")
+            .limit(6);
+          listings = (fallbackData ?? []) as DbListing[];
+        } else {
+          listings = (data ?? []) as DbListing[];
+        }
+      } catch (e) {
+        console.error("[chat/route] Listings search error:", e);
       }
-    } catch (e) {
-      console.error("[chat/route] Listings search error:", e);
     }
 
     console.log(
-      `[chat/route] Found ${listings.length} listings, isAutoTrigger=${isAutoTrigger}`
+      `[chat/route] Found ${listings.length} listings to send`
     );
 
-    // ─── 3. Build Claude messages ───
+    // ─── 4. Build Claude messages ───
     const claudeMessages = messages.map(
       (m: { role: string; content: string }) => ({
         role: m.role as "user" | "assistant",
@@ -168,8 +219,9 @@ export async function POST(request: NextRequest) {
       })
     );
 
-    // Give Claude a plain text summary
-    if (listings.length > 0) {
+    // Give Claude context about listings
+    if (shouldSendListings && listings.length > 0) {
+      // New listings being shown — tell Claude about them
       const summary = listings
         .map(
           (l, i) =>
@@ -181,6 +233,13 @@ export async function POST(request: NextRequest) {
       if (lastMsg?.role === "user") {
         lastMsg.content += `\n\n[Ho trovato ${listings.length} immobili. Le card sono già visibili all'utente. Presenta i risultati in modo discorsivo, concentrandoti sul perché sono adatti:]\n${summary}`;
       }
+    } else if (!shouldSendListings && hasShownListings) {
+      // Follow-up: remind Claude what listings were already shown
+      systemPrompt +=
+        `\n\n[CONTESTO FOLLOW-UP: L'utente ha già visto ${(shown_listing_ids as string[]).length} annunci nelle card sopra. ` +
+        `Non ripresentarli. Rispondi alla domanda dell'utente facendo riferimento agli annunci già mostrati se pertinente. ` +
+        `Se l'utente chiede dettagli su un annuncio specifico, aiutalo. ` +
+        `Se vuole nuovi risultati, suggerisci di chiedere "mostrami altri annunci" o di cambiare i criteri.]`;
     }
 
     if (isAutoTrigger) {
@@ -188,12 +247,12 @@ export async function POST(request: NextRequest) {
         "\n\nL'utente ha appena completato il wizard. Presenta subito i risultati trovati. Se non ci sono risultati, suggerisci di ampliare la ricerca.";
     }
 
-    // ─── 4. Create SSE stream ───
+    // ─── 5. Create SSE stream ───
     const stream = new ReadableStream({
       async start(controller) {
         try {
-          // STEP A: send listings event FIRST
-          if (listings.length > 0) {
+          // STEP A: send listings event FIRST (only if needed)
+          if (shouldSendListings && listings.length > 0) {
             send(controller, {
               type: "listings",
               data: listings.map((l, i) => ({
@@ -211,7 +270,7 @@ export async function POST(request: NextRequest) {
                 has_parking: l.has_parking,
                 has_elevator: l.has_elevator,
                 has_terrace: l.has_terrace,
-                match_score: 95 - i * 4, // 95, 91, 87, 83, 79, 75
+                match_score: 95 - i * 4,
               })),
             });
           }

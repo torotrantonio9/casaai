@@ -64,6 +64,7 @@ export function ChatWidget({
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const autoSentRef = useRef(false);
+  const shownListingIdsRef = useRef<string[]>([]);
 
   const scrollToBottom = useCallback(() => {
     scrollRef.current?.scrollTo({
@@ -79,7 +80,7 @@ export function ChatWidget({
   const streamChatMessage = useCallback(
     async (
       allMessages: ChatMessage[],
-      options?: { hidden?: boolean; onDone?: () => void }
+      options?: { hidden?: boolean; onDone?: () => void; isAutoTrigger?: boolean }
     ) => {
       setIsStreaming(true);
       setStreamingText("");
@@ -100,6 +101,8 @@ export function ChatWidget({
               })),
             session_id: sessionId,
             context_id: contextId,
+            is_auto_trigger: options?.isAutoTrigger ?? false,
+            shown_listing_ids: shownListingIdsRef.current,
           }),
           signal: abortRef.current.signal,
         });
@@ -135,6 +138,11 @@ export function ChatWidget({
               console.log("SSE EVENT:", event.type, event);
 
               if (event.type === "listings" && event.data?.length > 0) {
+                // Track shown listing IDs
+                const newIds = event.data.map((l: ListingCard) => l.id);
+                shownListingIdsRef.current = [
+                  ...new Set([...shownListingIdsRef.current, ...newIds]),
+                ];
                 // Insert listings as their own message
                 setMessages((prev) => [
                   ...prev,
@@ -218,6 +226,7 @@ export function ChatWidget({
       const allMsgs = [...messages, autoMsg];
       streamChatMessage(allMsgs, {
         hidden: true,
+        isAutoTrigger: true,
         onDone: () => {
           setInputEnabled(true);
           setCustomPlaceholder("Vuoi affinare la ricerca? Chiedi all'AI...");
