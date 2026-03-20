@@ -228,7 +228,7 @@ export function ChatWidget({
       {/* Header */}
       <div className="flex items-center gap-2 border-b border-gray-100 px-4 py-3">
         <div className="h-2.5 w-2.5 rounded-full bg-green-500" />
-        <h3 className="text-sm font-semibold" style={{ color: "#1a1a2e" }}>
+        <h3 className="text-sm font-semibold" style={{ color: "#111827" }}>
           Assistente CasaAI
         </h3>
       </div>
@@ -254,7 +254,7 @@ export function ChatWidget({
           onChange={(e) => setInput(e.target.value)}
           placeholder={customPlaceholder}
           disabled={isStreaming || !inputEnabled}
-          style={{ color: "#1a1a2e", background: "#ffffff" }}
+          style={{ color: "#111827", background: "#ffffff" }}
           className="flex-1 rounded-lg border px-3 py-2 text-sm focus:ring-1 focus:outline-none disabled:opacity-50"
           // Explicit inline border colors for clarity
           onFocus={(e) => (e.currentTarget.style.borderColor = "#1e40af")}

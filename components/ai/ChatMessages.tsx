@@ -58,20 +58,21 @@ function InlineListingCard({ listing }: { listing: ListingCard }) {
   if (listing.has_terrace) features.push("Terrazzo");
 
   return (
-    <div className="overflow-hidden rounded-xl border bg-white shadow-sm transition-shadow hover:shadow-md"
-      style={{ borderColor: "#e2e8f0" }}>
+    <Link
+      href={`/annunci/${listing.id}`}
+      className="block overflow-hidden rounded-xl border bg-white shadow-sm transition-shadow hover:shadow-md cursor-pointer"
+      style={{ borderColor: "#e2e8f0" }}
+    >
       {/* Photo placeholder */}
       <div
         className="flex h-28 items-center justify-center"
         style={{ background: placeholderColor(listing.id) }}
       >
-        <svg className="h-8 w-8 opacity-30" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 21v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21m0 0h4.5V3.545M12.75 21h7.5V10.75M2.25 21h1.5m18 0h-18M2.25 9l4.5-1.636M18.75 3l-1.5.545m0 6.205l3 1m1.5.5l-1.5-.5M6.75 7.364V3h-3v18m3-13.636l10.5-3.819" />
-        </svg>
+        <span className="text-3xl">🏠</span>
       </div>
       {/* Content */}
       <div className="p-3">
-        <p className="truncate text-sm font-semibold" style={{ color: "#1a1a2e" }}>
+        <p className="text-sm font-semibold line-clamp-1" style={{ color: "#111827" }}>
           {listing.title}
         </p>
         <p className="text-base font-bold" style={{ color: "#1e40af" }}>
@@ -94,15 +95,14 @@ function InlineListingCard({ listing }: { listing: ListingCard }) {
             ))}
           </div>
         )}
-        <Link
-          href={`/annunci/${listing.id}`}
+        <span
           className="mt-2 inline-block rounded-lg px-3 py-1.5 text-xs font-semibold text-white"
           style={{ background: "#1e40af" }}
         >
           Vedi dettagli
-        </Link>
+        </span>
       </div>
-    </div>
+    </Link>
   );
 }
 
@@ -125,8 +125,8 @@ export function ChatMessages({
             className="max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed"
             style={
               msg.role === "user"
-                ? { background: "#1e40af", color: "#ffffff" }
-                : { background: "#f8fafc", color: "#1e293b", border: "1px solid #e2e8f0" }
+                ? { background: "#1e40af", color: "#ffffff", borderBottomRightRadius: 0 }
+                : { background: "#f9fafb", color: "#111827", border: "1px solid #e2e8f0", borderBottomLeftRadius: 0 }
             }
           >
             {msg.content}
@@ -143,7 +143,7 @@ export function ChatMessages({
         >
           <div
             className="max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed"
-            style={{ background: "#f8fafc", color: "#1e293b", border: "1px solid #e2e8f0" }}
+            style={{ background: "#f9fafb", color: "#111827", border: "1px solid #e2e8f0", borderBottomLeftRadius: 0 }}
           >
             {streamingText}
             <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse" style={{ background: "#94a3b8" }} />
@@ -156,7 +156,7 @@ export function ChatMessages({
         <div className="flex justify-start">
           <div
             className="rounded-2xl px-4 py-3"
-            style={{ background: "#f8fafc", border: "1px solid #e2e8f0" }}
+            style={{ background: "#f9fafb", border: "1px solid #e2e8f0" }}
           >
             <div className="flex gap-1">
               <span className="h-2 w-2 animate-bounce rounded-full [animation-delay:0ms]" style={{ background: "#94a3b8" }} />

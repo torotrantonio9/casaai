@@ -57,10 +57,12 @@ export function HomeChatSection() {
           `Perfetto! Ho impostato la tua ricerca: ${intentLabel} fino a ${budgetLabel}${locationLabel}${featuresLabel}. Sto cercando le migliori proposte per te...`
         );
 
-        // Auto-trigger first search
-        setAutoMessage(
-          "Mostrami subito i migliori annunci disponibili in base alle mie preferenze"
-        );
+        // Auto-trigger first search with 500ms delay
+        setTimeout(() => {
+          setAutoMessage(
+            "Mostrami subito i migliori annunci disponibili in base alle mie preferenze"
+          );
+        }, 500);
       }
     } catch {
       // If context save fails, still proceed to chat
@@ -75,7 +77,7 @@ export function HomeChatSection() {
   return (
     <section className="py-16" style={{ background: "linear-gradient(to bottom, #ffffff, #eff6ff)" }}>
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <h2 className="mb-8 text-center text-3xl font-bold" style={{ color: "#1a1a2e" }}>
+        <h2 className="mb-8 text-center text-3xl font-bold" style={{ color: "#111827" }}>
           {phase === "onboarding"
             ? "Iniziamo la ricerca"
             : "Parla con l'AI"}

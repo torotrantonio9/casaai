@@ -134,7 +134,7 @@ export function ChatOnboarding({ onComplete, onSkip }: Props) {
           {/* Step 0: Intent */}
           {step === 0 && (
             <div className="space-y-4">
-              <h3 className="text-xl font-bold" style={{ color: "#1a1a2e" }}>
+              <h3 className="text-xl font-bold" style={{ color: "#111827" }}>
                 Stai cercando per...
               </h3>
               <div className="grid grid-cols-2 gap-3">
@@ -170,7 +170,7 @@ export function ChatOnboarding({ onComplete, onSkip }: Props) {
           {/* Step 1: Budget */}
           {step === 1 && (
             <div className="space-y-4">
-              <h3 className="text-xl font-bold" style={{ color: "#1a1a2e" }}>
+              <h3 className="text-xl font-bold" style={{ color: "#111827" }}>
                 Qual è il tuo budget massimo?
               </h3>
               <div className="text-center">
@@ -204,7 +204,7 @@ export function ChatOnboarding({ onComplete, onSkip }: Props) {
           {/* Step 2: Location + Distance */}
           {step === 2 && (
             <div className="space-y-4">
-              <h3 className="text-xl font-bold" style={{ color: "#1a1a2e" }}>
+              <h3 className="text-xl font-bold" style={{ color: "#111827" }}>
                 Da dove vuoi partire?
               </h3>
               <input
@@ -221,7 +221,7 @@ export function ChatOnboarding({ onComplete, onSkip }: Props) {
                     },
                   }))
                 }
-                style={{ color: "#1a1a2e", background: "#ffffff", borderColor: "#cbd5e1" }}
+                style={{ color: "#111827", background: "#ffffff", borderColor: "#cbd5e1" }}
                 className="w-full rounded-lg border px-4 py-3 text-sm focus:outline-none"
               />
               <p className="text-xs" style={{ color: "#94a3b8" }}>
@@ -258,7 +258,7 @@ export function ChatOnboarding({ onComplete, onSkip }: Props) {
           {/* Step 3: Features */}
           {step === 3 && (
             <div className="space-y-4">
-              <h3 className="text-xl font-bold" style={{ color: "#1a1a2e" }}>
+              <h3 className="text-xl font-bold" style={{ color: "#111827" }}>
                 Cosa non può mancare?
               </h3>
               <p className="text-sm" style={{ color: "#64748b" }}>
@@ -293,7 +293,7 @@ export function ChatOnboarding({ onComplete, onSkip }: Props) {
                   }
                   placeholder='es. "vicino a buone scuole elementari"'
                   rows={2}
-                  style={{ color: "#1a1a2e", background: "#ffffff", borderColor: "#cbd5e1" }}
+                  style={{ color: "#111827", background: "#ffffff", borderColor: "#cbd5e1" }}
                   className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none"
                 />
               </div>
