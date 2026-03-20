@@ -134,19 +134,34 @@ export async function POST(request: NextRequest) {
             id: r.id,
             title: r.title,
             price: r.price,
+            price_period: r.price_period,
+            address: r.address,
             city: r.city,
             surface_sqm: r.surface_sqm,
             rooms: r.rooms,
+            floor: r.floor,
             photos: r.photos,
             type: r.type,
+            property_type: r.property_type,
+            has_parking: r.has_parking,
+            has_elevator: r.has_elevator,
+            has_garden: r.has_garden,
+            has_terrace: r.has_terrace,
+            ai_reason: null,   // will be enriched by AI below
+            match_score: null,  // will be enriched by AI below
           }));
 
           listingsData = `\n\n[RISULTATI RICERCA - mostra questi all'utente]\n${results
             .map(
               (r, i) =>
-                `${i + 1}. "${r.title}" - €${r.price.toLocaleString("it-IT")} - ${r.city} - ${r.surface_sqm}m² - ${r.rooms} locali - ${r.property_type}${r.has_parking ? " - Posto auto" : ""}${r.has_garden ? " - Giardino" : ""}${r.has_elevator ? " - Ascensore" : ""}${r.has_terrace ? " - Terrazzo" : ""}`
+                `${i + 1}. [ID:${r.id}] "${r.title}" - €${r.price.toLocaleString("it-IT")}${r.price_period === "month" ? "/mese" : ""} - ${r.address}, ${r.city} - ${r.surface_sqm}m² - ${r.rooms} locali - Piano ${r.floor ?? "N/D"} - ${r.property_type}${r.has_parking ? " - Posto auto" : ""}${r.has_garden ? " - Giardino" : ""}${r.has_elevator ? " - Ascensore" : ""}${r.has_terrace ? " - Terrazzo" : ""}`
             )
-            .join("\n")}`;
+            .join("\n")}
+
+ISTRUZIONI IMPORTANTI: Nella tua risposta testuale, per ogni annuncio che menzioni devi includere un blocco JSON nascosto alla fine del messaggio in questo formato esatto:
+<!--LISTING_SCORES:${JSON.stringify(results.map(r => ({ id: r.id })))}-->
+Il blocco deve contenere per ogni listing: "id", "match_score" (numero 0-100 basato su quanto l'annuncio corrisponde alle preferenze dell'utente), "ai_reason" (UNA frase breve, max 15 parole, che spiega perché è adatto a questo utente specifico).
+Esempio: <!--LISTING_SCORES:[{"id":"abc","match_score":92,"ai_reason":"Vicino al centro con giardino e posto auto"}]-->`;
         }
       } catch {
         // Search failed — continue without listings

@@ -1,7 +1,8 @@
 "use client";
 
+import { useRouter } from "next/navigation";
+import { useState } from "react";
 import { motion } from "framer-motion";
-import Link from "next/link";
 
 export interface ChatMessage {
   role: "user" | "assistant";
@@ -12,9 +13,12 @@ export interface ListingCard {
   id: string;
   title: string;
   price: number;
+  price_period?: string | null;
+  address?: string;
   city: string;
   surface_sqm: number;
   rooms: number;
+  floor?: number | null;
   photos: string[];
   type: string;
   property_type?: string;
@@ -22,6 +26,8 @@ export interface ListingCard {
   has_elevator?: boolean;
   has_garden?: boolean;
   has_terrace?: boolean;
+  ai_reason?: string;
+  match_score?: number;
 }
 
 interface Props {
@@ -31,80 +37,224 @@ interface Props {
   streamingText: string;
 }
 
-function formatPrice(price: number): string {
-  return new Intl.NumberFormat("it-IT", {
-    style: "currency",
-    currency: "EUR",
-    maximumFractionDigits: 0,
-  }).format(price);
+/* ───────── helpers ───────── */
+
+function matchBadgeColor(score: number): string {
+  if (score > 90) return "#2d6a4f";
+  if (score > 80) return "#e07b39";
+  return "#9e6b4a";
 }
 
-// Generate a consistent pastel color from listing id
-function placeholderColor(id: string): string {
-  const colors = [
-    "#dbeafe", "#fce7f3", "#d1fae5", "#fef3c7",
-    "#e0e7ff", "#fae8ff", "#ccfbf1", "#fee2e2",
-  ];
-  let hash = 0;
-  for (let i = 0; i < id.length; i++) hash = id.charCodeAt(i) + ((hash << 5) - hash);
-  return colors[Math.abs(hash) % colors.length];
+function listingEmoji(listing: ListingCard): string {
+  if (listing.property_type === "apartment") return "🏢";
+  if (listing.has_garden) return "🌿";
+  return "🏠";
 }
 
-function InlineListingCard({ listing }: { listing: ListingCard }) {
-  const features: string[] = [];
-  if (listing.has_parking) features.push("Posto auto");
-  if (listing.has_elevator) features.push("Ascensore");
-  if (listing.has_garden) features.push("Giardino");
-  if (listing.has_terrace) features.push("Terrazzo");
+/* ───────── Single listing card ───────── */
+
+function ResultCard({ listing }: { listing: ListingCard }) {
+  const router = useRouter();
+  const [shadow, setShadow] = useState("none");
+  const score = listing.match_score;
 
   return (
-    <Link
-      href={`/annunci/${listing.id}`}
-      className="block overflow-hidden rounded-xl border bg-white shadow-sm transition-shadow hover:shadow-md cursor-pointer"
-      style={{ borderColor: "#e2e8f0" }}
+    <div
+      onClick={() => router.push(`/annunci/${listing.id}`)}
+      onMouseEnter={() => setShadow("0 4px 20px rgba(0,0,0,0.1)")}
+      onMouseLeave={() => setShadow("none")}
+      style={{
+        border: "1px solid #e5e7eb",
+        borderRadius: 16,
+        overflow: "hidden",
+        cursor: "pointer",
+        background: "white",
+        transition: "box-shadow 0.2s",
+        boxShadow: shadow,
+      }}
     >
-      {/* Photo placeholder */}
+      {/* Image area + match badge */}
       <div
-        className="flex h-28 items-center justify-center"
-        style={{ background: placeholderColor(listing.id) }}
+        style={{
+          position: "relative",
+          height: 140,
+          background: "#f5f0eb",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
       >
-        <span className="text-3xl">🏠</span>
-      </div>
-      {/* Content */}
-      <div className="p-3">
-        <p className="text-sm font-semibold line-clamp-1" style={{ color: "#111827" }}>
-          {listing.title}
-        </p>
-        <p className="text-base font-bold" style={{ color: "#1e40af" }}>
-          {formatPrice(listing.price)}
-        </p>
-        <p className="text-xs" style={{ color: "#64748b" }}>
-          {listing.city} &middot; {listing.surface_sqm}m&sup2; &middot;{" "}
-          {listing.rooms} locali
-        </p>
-        {features.length > 0 && (
-          <div className="mt-1.5 flex flex-wrap gap-1">
-            {features.map((f) => (
-              <span
-                key={f}
-                className="rounded-full px-2 py-0.5 text-[10px] font-medium"
-                style={{ background: "#f1f5f9", color: "#1e293b" }}
-              >
-                {f}
-              </span>
-            ))}
+        <span style={{ fontSize: 48 }}>{listingEmoji(listing)}</span>
+        {typeof score === "number" && (
+          <div
+            style={{
+              position: "absolute",
+              top: 10,
+              right: 10,
+              background: matchBadgeColor(score),
+              color: "white",
+              borderRadius: 20,
+              padding: "4px 10px",
+              fontSize: 12,
+              fontWeight: 600,
+            }}
+          >
+            {score}% match
           </div>
         )}
-        <span
-          className="mt-2 inline-block rounded-lg px-3 py-1.5 text-xs font-semibold text-white"
-          style={{ background: "#1e40af" }}
-        >
-          Vedi dettagli
-        </span>
       </div>
-    </Link>
+
+      {/* Content */}
+      <div style={{ padding: 14 }}>
+        {/* Price */}
+        <div
+          style={{
+            fontSize: 22,
+            fontWeight: 700,
+            color: "#111827",
+            marginBottom: 8,
+          }}
+        >
+          €&nbsp;{listing.price.toLocaleString("it-IT")}
+          {listing.price_period === "month" ? "/mese" : ""}
+        </div>
+
+        {/* Address */}
+        <div
+          style={{
+            fontSize: 13,
+            color: "#6b7280",
+            marginBottom: 10,
+            display: "flex",
+            alignItems: "center",
+            gap: 4,
+          }}
+        >
+          📍 {listing.address ? `${listing.address}, ` : ""}
+          {listing.city}
+        </div>
+
+        {/* Technical details */}
+        <div
+          style={{
+            display: "flex",
+            gap: 12,
+            fontSize: 12,
+            color: "#6b7280",
+            marginBottom: 12,
+          }}
+        >
+          <span>⇄ {listing.rooms} locali</span>
+          <span>⬚ {listing.surface_sqm}m²</span>
+          {listing.floor != null && <span>▤ {listing.floor}° piano</span>}
+        </div>
+
+        {/* AI reason */}
+        <div
+          style={{
+            fontSize: 12,
+            borderTop: "1px solid #f3f4f6",
+            paddingTop: 10,
+          }}
+        >
+          <span style={{ color: "#e07b39", fontWeight: 600 }}>
+            ✦ Perché ti consiglio questo:{" "}
+          </span>
+          <span style={{ color: "#374151" }}>
+            {listing.ai_reason ||
+              "Ottima compatibilità con le tue preferenze"}
+          </span>
+        </div>
+      </div>
+    </div>
   );
 }
+
+/* ───────── Listings block (header + grid + footer) ───────── */
+
+function ListingsBlock({ listings }: { listings: ListingCard[] }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      style={{ width: "100%" }}
+    >
+      {/* HEADER */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 16,
+          paddingBottom: 12,
+          borderBottom: "1px solid #e5e7eb",
+        }}
+      >
+        <span style={{ fontWeight: 600, color: "#111827" }}>
+          ✦ Ho trovato {listings.length} immobili per te
+        </span>
+        <span style={{ fontSize: 12, color: "#6b7280" }}>
+          Ordinati per compatibilità con la tua ricerca
+        </span>
+      </div>
+
+      {/* GRID — 3 cols desktop, 1 mobile */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))",
+          gap: 16,
+        }}
+      >
+        {listings.map((listing) => (
+          <ResultCard key={listing.id} listing={listing} />
+        ))}
+      </div>
+
+      {/* FOOTER */}
+      <div
+        style={{
+          marginTop: 16,
+          padding: "14px 16px",
+          background: "#f9fafb",
+          borderRadius: 12,
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+        }}
+      >
+        <span style={{ fontSize: 13, color: "#6b7280" }}>
+          Vuoi raffinare la ricerca? Aggiungi dettagli come zona specifica,
+          piano, esposizione...
+        </span>
+        <button
+          onClick={() => {
+            const el = document.querySelector<HTMLInputElement>(
+              'input[type="text"]'
+            );
+            el?.focus();
+          }}
+          style={{
+            background: "white",
+            border: "1px solid #e5e7eb",
+            borderRadius: 8,
+            padding: "8px 16px",
+            fontSize: 13,
+            fontWeight: 500,
+            cursor: "pointer",
+            whiteSpace: "nowrap",
+            marginLeft: 12,
+            color: "#111827",
+          }}
+        >
+          Raffina →
+        </button>
+      </div>
+    </motion.div>
+  );
+}
+
+/* ───────── Main export ───────── */
 
 export function ChatMessages({
   messages,
@@ -125,8 +275,17 @@ export function ChatMessages({
             className="max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed"
             style={
               msg.role === "user"
-                ? { background: "#1e40af", color: "#ffffff", borderBottomRightRadius: 0 }
-                : { background: "#f9fafb", color: "#111827", border: "1px solid #e2e8f0", borderBottomLeftRadius: 0 }
+                ? {
+                    background: "#1e40af",
+                    color: "#ffffff",
+                    borderBottomRightRadius: 0,
+                  }
+                : {
+                    background: "#f9fafb",
+                    color: "#111827",
+                    border: "1px solid #e2e8f0",
+                    borderBottomLeftRadius: 0,
+                  }
             }
           >
             {msg.content}
@@ -143,10 +302,18 @@ export function ChatMessages({
         >
           <div
             className="max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed"
-            style={{ background: "#f9fafb", color: "#111827", border: "1px solid #e2e8f0", borderBottomLeftRadius: 0 }}
+            style={{
+              background: "#f9fafb",
+              color: "#111827",
+              border: "1px solid #e2e8f0",
+              borderBottomLeftRadius: 0,
+            }}
           >
             {streamingText}
-            <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse" style={{ background: "#94a3b8" }} />
+            <span
+              className="ml-0.5 inline-block h-4 w-0.5 animate-pulse"
+              style={{ background: "#94a3b8" }}
+            />
           </div>
         </motion.div>
       )}
@@ -159,28 +326,25 @@ export function ChatMessages({
             style={{ background: "#f9fafb", border: "1px solid #e2e8f0" }}
           >
             <div className="flex gap-1">
-              <span className="h-2 w-2 animate-bounce rounded-full [animation-delay:0ms]" style={{ background: "#94a3b8" }} />
-              <span className="h-2 w-2 animate-bounce rounded-full [animation-delay:150ms]" style={{ background: "#94a3b8" }} />
-              <span className="h-2 w-2 animate-bounce rounded-full [animation-delay:300ms]" style={{ background: "#94a3b8" }} />
+              <span
+                className="h-2 w-2 animate-bounce rounded-full [animation-delay:0ms]"
+                style={{ background: "#94a3b8" }}
+              />
+              <span
+                className="h-2 w-2 animate-bounce rounded-full [animation-delay:150ms]"
+                style={{ background: "#94a3b8" }}
+              />
+              <span
+                className="h-2 w-2 animate-bounce rounded-full [animation-delay:300ms]"
+                style={{ background: "#94a3b8" }}
+              />
             </div>
           </div>
         </div>
       )}
 
-      {/* Listing cards in 2-column grid */}
-      {listings.length > 0 && (
-        <motion.div
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="flex justify-start"
-        >
-          <div className="w-full max-w-[95%] grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {listings.map((listing) => (
-              <InlineListingCard key={listing.id} listing={listing} />
-            ))}
-          </div>
-        </motion.div>
-      )}
+      {/* Listing cards — visual block */}
+      {listings.length > 0 && <ListingsBlock listings={listings} />}
     </div>
   );
 }

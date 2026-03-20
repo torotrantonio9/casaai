@@ -113,10 +113,9 @@ export function ChatWidget({
                 const event = JSON.parse(jsonStr);
                 if (event.type === "text") {
                   fullText += event.content;
-                  const displayText = fullText.replace(
-                    /<!--FILTERS:[\s\S]*?-->/,
-                    ""
-                  );
+                  const displayText = fullText
+                    .replace(/<!--FILTERS:[\s\S]*?-->/, "")
+                    .replace(/<!--LISTING_SCORES:[\s\S]*?-->/, "");
                   setStreamingText(displayText);
                 } else if (event.type === "listings") {
                   setListings(event.data);
@@ -132,10 +131,38 @@ export function ChatWidget({
                   ]);
                   setStreamingText("");
                 } else if (event.type === "done") {
-                  const displayText = fullText.replace(
-                    /<!--FILTERS:[\s\S]*?-->/,
-                    ""
+                  // Extract AI scores for listings
+                  const scoresMatch = fullText.match(
+                    /<!--LISTING_SCORES:([\s\S]*?)-->/
                   );
+                  if (scoresMatch) {
+                    try {
+                      const scores = JSON.parse(scoresMatch[1]) as {
+                        id: string;
+                        match_score?: number;
+                        ai_reason?: string;
+                      }[];
+                      setListings((prev) =>
+                        prev.map((l) => {
+                          const s = scores.find((sc) => sc.id === l.id);
+                          if (s) {
+                            return {
+                              ...l,
+                              match_score: s.match_score ?? l.match_score,
+                              ai_reason: s.ai_reason ?? l.ai_reason,
+                            };
+                          }
+                          return l;
+                        })
+                      );
+                    } catch {
+                      // ignore parse errors
+                    }
+                  }
+
+                  const displayText = fullText
+                    .replace(/<!--FILTERS:[\s\S]*?-->/, "")
+                    .replace(/<!--LISTING_SCORES:[\s\S]*?-->/, "");
                   if (displayText.trim()) {
                     setMessages((prev) => [
                       ...prev,
@@ -152,7 +179,9 @@ export function ChatWidget({
         }
 
         if (fullText) {
-          const displayText = fullText.replace(/<!--FILTERS:[\s\S]*?-->/, "");
+          const displayText = fullText
+            .replace(/<!--FILTERS:[\s\S]*?-->/, "")
+            .replace(/<!--LISTING_SCORES:[\s\S]*?-->/, "");
           if (displayText.trim() && streamingText) {
             setMessages((prev) => [
               ...prev,
