@@ -198,7 +198,7 @@ export default function ValutazionePage() {
                 name="year_built"
                 type="number"
                 min={1800}
-                max={2026}
+                max={new Date().getFullYear()}
                 placeholder="2005"
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
               />

@@ -2,7 +2,7 @@ import type { MetadataRoute } from "next";
 
 export const dynamic = "force-dynamic";
 
-const BASE_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://casaai.it";
+const BASE_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://casaai.it").replace(/\/+$/, "");
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   let listings: { id: string; updated_at: string }[] = [];

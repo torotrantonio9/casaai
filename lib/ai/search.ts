@@ -220,12 +220,13 @@ export async function semanticSearch(
   // Feature filters (boolean columns)
   if (filters.features) {
     for (const feature of filters.features) {
-      const col = featureColumns[feature];
-      if (col) {
-        sql += ` AND ${col} = TRUE`;
-      }
       if (feature === "energy_class_ab") {
         sql += ` AND energy_class IN ('A4','A3','A2','A1','B')`;
+      } else {
+        const col = featureColumns[feature];
+        if (col) {
+          sql += ` AND ${col} = TRUE`;
+        }
       }
     }
   }

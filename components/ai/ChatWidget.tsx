@@ -183,14 +183,16 @@ export function ChatWidget({
         }
 
         // Fallback: if stream ended without "done" event
-        if (fullText && streamingText) {
-          if (fullText.trim()) {
-            setMessages((prev) => [
-              ...prev,
-              makeTextMsg("assistant", fullText),
-            ]);
-            setStreamingText("");
-          }
+        if (fullText.trim()) {
+          setMessages((prev) => {
+            // Avoid duplicating if "done" event already added it
+            const lastMsg = prev[prev.length - 1];
+            if (lastMsg?.role === "assistant" && lastMsg.content === fullText) {
+              return prev;
+            }
+            return [...prev, makeTextMsg("assistant", fullText)];
+          });
+          setStreamingText("");
         }
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") {
@@ -221,7 +223,7 @@ export function ChatWidget({
         options?.onDone?.();
       }
     },
-    [sessionId, contextId, streamingText, shownListingIds]
+    [sessionId, contextId, shownListingIds]
   );
 
   // Auto-send message after wizard completion
